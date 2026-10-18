@@ -1,0 +1,61 @@
+# Render blueprint. Connect this repository at https://render.com/deploy and
+# Render reads this file; after that every push to main deploys automatically.
+#
+# Why Render rather than Vercel or Cloudflare: a study runs for 15+ minutes in
+# the background and its results live in a SQLite file that must survive
+# between requests. Serverless functions are killed long before a study
+# finishes and have no lasting disk. An ordinary server with a disk does both.
+services:
+  - type: web
+    name: outrank-map
+    runtime: node
+    # A disk needs a paid instance. The free tier also sleeps when idle,
+    # which would kill a study halfway through.
+    plan: starter
+    region: oregon
+    branch: main
+    autoDeploy: true
+
+    # No dependencies — the app runs on Node's standard library.
+    buildCommand: 'echo "no dependencies to install"'
+    startCommand: node server.js
+    # Answers without a session and reveals nothing.
+    healthCheckPath: /api/health
+
+    disk:
+      name: outrank-map-data
+      mountPath: /var/data
+      sizeGB: 1
+
+    envVars:
+      # node:sqlite needs Node 22.5+.
+      - key: NODE_VERSION
+        value: '22'
+      # Turns on the Secure flag for the session cookie.
+      - key: NODE_ENV
+        value: production
+      # Render routes to the container; 127.0.0.1 would refuse it. Listening
+      # on a public address also makes APP_PASSWORD mandatory.
+      - key: HOST
+        value: 0.0.0.0
+      # On the mounted disk, so studies and reports survive deploys.
+      - key: DB_PATH
+        value: /var/data/outrank-map.db
+      # Render's proxy sets X-Forwarded-For; login throttling keys on it.
+      - key: TRUST_PROXY
+        value: 'true'
+      - key: SERP_CONCURRENCY
+        value: '8'
+      - key: DATAFORSEO_MAX_USD
+        value: '10'
+
+      # Secrets: sync:false makes Render prompt for them and keep them in the
+      # dashboard, never in this file.
+      - key: APP_PASSWORD
+        sync: false
+      - key: AHREFS_API_KEY
+        sync: false
+      - key: DATAFORSEO_LOGIN
+        sync: false
+      - key: DATAFORSEO_PASSWORD
+        sync: false

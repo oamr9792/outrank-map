@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Outrank Map</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Outrank Map</h1>
+    <p class="sub">Which domains beat a target on person-name searches, and with what pages.</p>
+    <div id="creds" class="creds"></div>
+    <button id="logout" class="ghost" hidden>Sign out</button>
+  </header>
+
+  <main>
+    <aside>
+      <section class="card">
+        <h2>New study</h2>
+        <form id="new">
+          <label>Target domain <input name="target" placeholder="therealdeal.com" required></label>
+          <div class="row">
+            <label>Country <input name="country" value="us" maxlength="2" size="3"></label>
+            <label>Keywords <input name="limit" type="number" min="1" max="10000" value="300"></label>
+          </div>
+          <div class="row">
+            <label>Words <input name="words" type="number" min="0" max="6" value="2" title="Exact word count; 0 = any"></label>
+            <label>Target pos ≤ <input name="maxPosition" type="number" min="1" max="100" value="20"></label>
+          </div>
+          <div class="row">
+            <label>Min volume <input name="minVolume" type="number" min="0" value="0"></label>
+            <label>Max volume <input name="maxVolume" type="number" min="0" value="0" title="0 = no cap. A cap trims celebrities."></label>
+          </div>
+          <p id="estimate" class="muted"></p>
+          <button type="submit">Run study</button>
+        </form>
+      </section>
+
+      <section class="card" id="jobCard" hidden>
+        <h2 id="jobTitle">Running</h2>
+        <pre id="jobLog"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Studies</h2>
+        <ul id="studies" class="studies"></ul>
+      </section>
+    </aside>
+
+    <section id="view" class="view">
+      <div class="empty">Run a study, or pick one on the left.</div>
+    </section>
+  </main>
+
+  <div id="login" class="overlay" hidden>
+    <form class="card">
+      <h2>Outrank Map</h2>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <p id="loginError" class="error"></p>
+      <button type="submit">Sign in</button>
+    </form>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

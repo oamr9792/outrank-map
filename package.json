@@ -1,0 +1,12 @@
+{
+  "name": "outrank-map",
+  "version": "1.0.0",
+  "description": "Finds the domains that most regularly outrank a target domain on person-name searches, as candidates for displacing negative coverage",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test \"test/**/*.test.js\""
+  }
+}

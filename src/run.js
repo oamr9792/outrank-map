@@ -2,7 +2,18 @@ import { openDb, tx, normalizeDomain, getStudy } from './db.js';
 import * as ahrefs from './ahrefs.js';
 import * as dfs from './dataforseo.js';
 
-export const DEFAULTS = { country: 'us', limit: 300, words: 2, maxPosition: 20, minVolume: 0, maxVolume: 0, depth: 30 };
+export const DEFAULTS = { country: 'us', limit: 300, minWords: 2, maxWords: 2, maxPosition: 20, minVolume: 0, maxVolume: 0, depth: 30 };
+
+export function wordsLabel(p) {
+  // Studies saved before the range existed carry a single `words`.
+  const lo = p.minWords ?? p.words ?? 0;
+  const hi = p.maxWords ?? p.words ?? 0;
+  if (!lo && !hi) return 'any number of words';
+  if (lo === hi) return `${lo} words`;
+  if (!hi) return `${lo}+ words`;
+  if (!lo) return `up to ${hi} words`;
+  return `${lo}–${hi} words`;
+}
 
 const depthFor = (maxPosition) => Math.min(100, Math.ceil((maxPosition + 10) / 10) * 10);
 
@@ -18,9 +29,11 @@ export function estimate(p) {
 
 function cleanParams(input) {
   const p = { ...DEFAULTS };
-  for (const k of ['limit', 'words', 'maxPosition', 'minVolume', 'maxVolume']) if (input[k] !== undefined && input[k] !== '') p[k] = Math.max(0, Math.floor(Number(input[k]) || 0));
+  for (const k of ['limit', 'minWords', 'maxWords', 'maxPosition', 'minVolume', 'maxVolume']) if (input[k] !== undefined && input[k] !== '') p[k] = Math.max(0, Math.floor(Number(input[k]) || 0));
   if (input.country) p.country = String(input.country).toLowerCase().slice(0, 2);
   p.limit = Math.min(Math.max(p.limit, 1), 10000);
+  // 0 means no bound on that side; a reversed range is read the right way round.
+  if (p.minWords && p.maxWords && p.minWords > p.maxWords) [p.minWords, p.maxWords] = [p.maxWords, p.minWords];
   p.maxPosition = Math.min(Math.max(p.maxPosition || 20, 1), 100);
   // Fetch deep enough to see the target wherever Ahrefs last saw it, plus slack.
   p.depth = depthFor(p.maxPosition);
@@ -37,7 +50,7 @@ export async function createStudy(input, log) {
   log(`Ahrefs units: ${units.used.toLocaleString()} used of ${units.limit?.toLocaleString() ?? 'unlimited'}; this pull needs up to ${need.toLocaleString()}`);
   if (need > units.remaining) throw new Error(`Not enough Ahrefs units: need up to ${need.toLocaleString()}, ${units.remaining.toLocaleString()} left until ${units.resetDate}. Lower the keyword limit.`);
 
-  log(`Pulling up to ${p.limit} person-name keywords (${p.words || 'any'} words, position ≤ ${p.maxPosition}) for ${target}…`);
+  log(`Pulling up to ${p.limit} person-name keywords (${wordsLabel(p)}, position ≤ ${p.maxPosition}) for ${target}…`);
   const kws = await ahrefs.personKeywords(target, p);
   log(`Ahrefs returned ${kws.length} keywords`);
 

@@ -3,6 +3,15 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const pct = (x) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
 const num = (x) => Number(x ?? 0).toLocaleString();
 // Result URLs come from Google, but only ever link to http(s).
+function wordsLabel(p) {
+  const lo = p.minWords ?? p.words ?? 0;
+  const hi = p.maxWords ?? p.words ?? 0;
+  if (!lo && !hi) return 'any-length';
+  if (lo === hi) return `${lo}-word`;
+  if (!hi) return `${lo}+ word`;
+  if (!lo) return `≤${hi}-word`;
+  return `${lo}–${hi}-word`;
+}
 const href = (u) => (/^https?:\/\//i.test(u ?? '') ? esc(u) : '#');
 
 async function api(path, opts = {}) {
@@ -167,7 +176,7 @@ function renderStudy() {
   $('#view').innerHTML = `
     <div class="head">
       <input id="studyName" class="title-input" value="${esc(study.name || '')}" placeholder="${esc(study.target)} — name this study">
-      <div class="muted">${esc(study.target)} · ${esc(study.country.toUpperCase())} · ${p.words || 'any'}-word person keywords · target pos ≤ ${p.maxPosition}${p.minVolume ? ` · vol ≥ ${p.minVolume}` : ''}${p.maxVolume ? ` · vol ≤ ${p.maxVolume}` : ''} · ${num(study.ahrefs_units)} Ahrefs units · $${study.dfs_cost.toFixed(2)} DataForSEO</div></div>
+      <div class="muted">${esc(study.target)} · ${esc(study.country.toUpperCase())} · ${wordsLabel(p)} person keywords · target pos ≤ ${p.maxPosition}${p.minVolume ? ` · vol ≥ ${p.minVolume}` : ''}${p.maxVolume ? ` · vol ≤ ${p.maxVolume}` : ''} · ${num(study.ahrefs_units)} Ahrefs units · $${study.dfs_cost.toFixed(2)} DataForSEO</div></div>
     <textarea id="studyNotes" rows="2" placeholder="Notes on this study (saved automatically)">${esc(study.notes || '')}</textarea>
     <div class="stats">
       <div class="stat"><b>${num(summary.contests)}</b><span>contests in scope<br>(target in live top ${p.depth})</span></div>

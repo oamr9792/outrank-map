@@ -25,8 +25,12 @@
             <label>Keywords <input name="limit" type="number" min="1" max="10000" value="300"></label>
           </div>
           <div class="row">
-            <label>Words <input name="words" type="number" min="0" max="6" value="2" title="Exact word count; 0 = any"></label>
+            <label>Min words <input name="minWords" type="number" min="0" max="10" value="2" title="0 = no minimum"></label>
+            <label>Max words <input name="maxWords" type="number" min="0" max="10" value="2" title="0 = no maximum. 4 adds name + employer / name + city searches."></label>
+          </div>
+          <div class="row">
             <label>Target pos ≤ <input name="maxPosition" type="number" min="1" max="100" value="20"></label>
+            <span style="flex:1"></span>
           </div>
           <div class="row">
             <label>Min volume <input name="minVolume" type="number" min="0" value="0"></label>

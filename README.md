@@ -9,8 +9,8 @@ name too, if it carried a piece about them.
 ## How it works
 
 1. **Ahrefs** (`site-explorer/organic-keywords`) lists the target's ranking
-   keywords that contain a person entity, filtered to an exact word count
-   (default 2 — "first last"), a target position ceiling and an optional
+   keywords that contain a person entity, filtered to a word-count range
+   (default 2–2 — "first last"; 2–4 adds "name + employer" searches), a target position ceiling and an optional
    volume band, organic positions only (Top stories carousel hits are
    excluded — they rarely survive to the live organic results). ~15 API
    units per keyword; the run refuses to start if the

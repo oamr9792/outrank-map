@@ -35,11 +35,12 @@ export async function unitsLeft() {
 /**
  * Person-name keywords the target ranks for, highest volume first.
  *
- * @param o.words      exact word count of the keyword (2 = "first last")
+ * @param o.minWords / o.maxWords  word-count range of the keyword, 0 = no
+ *                    bound (2–2 = "first last"; 2–4 adds "name + employer")
  * @param o.maxPosition only keywords where the target ranks at or above this
  * @param o.minVolume / o.maxVolume  volume band; the cap trims celebrities
  */
-export async function personKeywords(target, { country = 'us', limit = 500, words = 2, maxPosition = 20, minVolume = 0, maxVolume = 0 } = {}) {
+export async function personKeywords(target, { country = 'us', limit = 500, minWords = 2, maxWords = 2, maxPosition = 20, minVolume = 0, maxVolume = 0 } = {}) {
   const and = [
     { not: { field: 'person_entities', is: 'empty' } },
     { field: 'best_position', is: ['lte', maxPosition] },
@@ -48,7 +49,8 @@ export async function personKeywords(target, { country = 'us', limit = 500, word
     // gone from the live organic results, so the keyword is no contest.
     { field: 'is_main_position', is: ['eq', true] },
   ];
-  if (words) and.push({ field: 'words', is: ['eq', words] });
+  if (minWords) and.push({ field: 'words', is: ['gte', minWords] });
+  if (maxWords) and.push({ field: 'words', is: ['lte', maxWords] });
   if (minVolume) and.push({ field: 'volume', is: ['gte', minVolume] });
   if (maxVolume) and.push({ field: 'volume', is: ['lte', maxVolume] });
 

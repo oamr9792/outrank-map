@@ -5,6 +5,12 @@ import { loadEnv, ROOT } from './src/env.js';
 import { installTrustStore } from './src/tls-trust.js';
 
 loadEnv();
+// On Render, keep the database on the mounted disk even if DB_PATH was not
+// set; anywhere else on the container it is wiped by every deploy.
+if (process.env.RENDER && !process.env.DB_PATH) {
+  if (fs.existsSync('/var/data')) process.env.DB_PATH = '/var/data/outrank-map.db';
+  else console.warn('WARNING: no disk mounted at /var/data. Studies and reports will be lost on every deploy. Add a disk in Render (Settings → Disks, mount path /var/data).');
+}
 installTrustStore((process.env.EXTRA_CA_CERTS || '').split(';').filter(Boolean));
 
 const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick } = await import('./src/db.js');
@@ -17,7 +23,9 @@ const dfs = await import('./src/dataforseo.js');
 openDb();
 
 const PORT = Number(process.env.PORT || 8801);
-const HOST = process.env.HOST || '127.0.0.1';
+// Render (which sets RENDER=true) routes to the container from outside, so a
+// loopback default there means a running app that only ever answers 502.
+const HOST = process.env.HOST || (process.env.RENDER ? '0.0.0.0' : '127.0.0.1');
 const LOGIN_REQUIRED = auth.initAuth({ host: HOST });
 const PUBLIC = path.join(ROOT, 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };

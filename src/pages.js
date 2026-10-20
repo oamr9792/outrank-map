@@ -183,7 +183,9 @@ export async function runExplain(studyId, log) {
     log(`Ahrefs: ${needAhrefs.length} pages, est. ${est.ahrefsUnits.toLocaleString()} units; ${before.remaining.toLocaleString()} left`);
     if (est.ahrefsUnits > before.remaining) throw new Error(`Not enough Ahrefs units: need about ${est.ahrefsUnits.toLocaleString()}, ${before.remaining.toLocaleString()} left until ${before.resetDate}.`);
     const got = await ahrefs.pageMetrics(needAhrefs);
-    for (const u of needAhrefs) savePageAhrefs(u, got.get(u) ?? {});
+    // Only pages Ahrefs answered for are marked done; the rest retry next run.
+    for (const [u, m] of got) savePageAhrefs(u, m);
+    if (got.size < needAhrefs.length) log(`Ahrefs: no row for ${needAhrefs.length - got.size} pages; they will be retried`);
     const after = await ahrefs.unitsLeft().catch(() => null);
     if (after) log(`Ahrefs: ${got.size} pages back; measured ${(after.used - before.used).toLocaleString()} units`);
   }

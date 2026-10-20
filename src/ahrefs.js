@@ -74,13 +74,20 @@ export async function personKeywords(target, { country = 'us', limit = 500, minW
   }));
 }
 
-// batch-analysis: up to 100 URLs per request. Ahrefs charges per row and
-// per request (a request costs at least 50 units). This per-URL figure is an
-// estimate until a run measures it; runs log the measured cost.
+// batch-analysis: up to 100 URLs per request. Measured October 2026: 7 units
+// per URL (75 URLs cost 525), and a request costs at least 50 units (2 URLs
+// cost 50). Runs log the measured cost.
 export const BATCH_SIZE = 100;
-export const UNITS_PER_PAGE = 5;
+export const UNITS_PER_PAGE = 7;
 export const MIN_UNITS_PER_REQUEST = 50;
-export const pageUnitsFor = (n) => (n ? Math.ceil(n / BATCH_SIZE) * MIN_UNITS_PER_REQUEST + n * UNITS_PER_PAGE : 0);
+export function pageUnitsFor(n) {
+  let units = 0;
+  for (let left = n; left > 0; left -= BATCH_SIZE) units += Math.max(MIN_UNITS_PER_REQUEST, Math.min(left, BATCH_SIZE) * UNITS_PER_PAGE);
+  return units;
+}
+
+/** Ahrefs echoes URLs without the scheme ("www.x.com/p/"); compare on that. */
+const bare = (u) => String(u ?? '').replace(/^https?:\/\//i, '').replace(/#.*$/, '').toLowerCase();
 
 /** URL rating and referring domains per exact URL, as a Map keyed by URL. */
 export async function pageMetrics(urls) {
@@ -91,14 +98,16 @@ export async function pageMetrics(urls) {
     const res = await fetch(`${BASE}/batch-analysis/batch-analysis`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${process.env.AHREFS_API_KEY}`, Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ select: ['url', 'url_rating', 'refdomains'], targets: chunk.map((url) => ({ url, mode: 'exact', protocol: 'both' })) }),
+      // `index` is only returned when selected.
+      body: JSON.stringify({ select: ['index', 'url', 'url_rating', 'refdomains'], targets: chunk.map((url) => ({ url, mode: 'exact', protocol: 'both' })) }),
       signal: AbortSignal.timeout(180000),
     });
     const body = await res.json().catch(() => null);
     if (!res.ok) throw new Error(`Ahrefs batch-analysis: HTTP ${res.status} ${body?.error ?? ''}`.trim());
+    const byBare = new Map(chunk.map((u) => [bare(u), u]));
     for (const t of body?.targets ?? []) {
-      // `index` is the position in the request; fall back to the URL echo.
-      const url = chunk[t.index] ?? t.url;
+      // `index` is the position in the request; otherwise match the echo.
+      const url = Number.isInteger(t.index) ? chunk[t.index] : byBare.get(bare(t.url));
       if (url) out.set(url, { urlRating: t.url_rating ?? null, refdomains: t.refdomains ?? null });
     }
   }

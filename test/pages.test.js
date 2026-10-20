@@ -66,18 +66,24 @@ test('Ahrefs batch-analysis: 100 URLs per request, results mapped by index', asy
   globalThis.fetch = async (url, opts) => {
     const body = JSON.parse(opts.body);
     calls.push({ url: String(url), n: body.targets.length, mode: body.targets[0].mode });
-    return { ok: true, json: async () => ({ targets: body.targets.map((t, index) => ({ index, url_rating: index, refdomains: index % 2 ? 0 : 3 })).reverse() }) };
+    // As the live API answers: the URL without its scheme, and `index` only
+    // when it was selected. The first batch omits it to exercise the fallback.
+    const withIndex = calls.length > 1 && body.select.includes('index');
+    return { ok: true, json: async () => ({ targets: body.targets.map((t, index) => ({ ...(withIndex ? { index } : {}), url: t.url.replace(/^https:\/\//, ''), url_rating: index, refdomains: index % 2 ? 0 : 3 })).reverse() }) };
   };
   try {
     const urls = Array.from({ length: 150 }, (_, i) => `https://x.com/p${i}`);
     const got = await pageMetrics(urls);
     assert.deepEqual(calls.map((c) => c.n), [100, 50]);
     assert.ok(calls.every((c) => c.url.endsWith('/v3/batch-analysis/batch-analysis') && c.mode === 'exact'));
-    assert.deepEqual(got.get('https://x.com/p101'), { urlRating: 1, refdomains: 0 });
+    assert.deepEqual(got.get('https://x.com/p101'), { urlRating: 1, refdomains: 0 }); // by index
+    assert.deepEqual(got.get('https://x.com/p2'), { urlRating: 2, refdomains: 3 }); // by URL echo
     assert.equal(got.size, 150);
   } finally {
     globalThis.fetch = real;
   }
   assert.equal(pageUnitsFor(0), 0);
-  assert.equal(pageUnitsFor(150), 2 * 50 + 150 * 5);
+  assert.equal(pageUnitsFor(75), 525); // measured
+  assert.equal(pageUnitsFor(2), 50); // measured: the per-request minimum
+  assert.equal(pageUnitsFor(150), 700 + 350);
 });

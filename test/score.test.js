@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { scoreDomains, domainDetail, contests } from '../src/score.js';
+import { scoreDomains, domainDetail, contests, PRESETS } from '../src/score.js';
 import { negativeTitle, pageType, accessTag } from '../src/classify.js';
 
 const r = (position, url, title = '') => ({ position, url, domain: new URL(url).hostname.replace(/^www\./, ''), title });
@@ -45,9 +45,12 @@ test('subdomains of the target count as the target', () => {
   assert.equal(c.find((k) => k.keyword === 'bob jones').target.position, 1);
 });
 
-test('negative scope keeps only contests where the target headline reads negative', () => {
-  const { summary } = scoreDomains(data, 'therealdeal.com', { scope: 'negative' });
-  assert.equal(summary.contests, 1);
+test('the negative preset weights only contests where the target headline reads negative', () => {
+  const { summary, domains } = scoreDomains(data, 'therealdeal.com', { profile: PRESETS.negative });
+  assert.equal(summary.contests, 2);
+  assert.equal(summary.effectiveContests, 1);
+  // linkedin won the one negative contest (ann smith) and lost the other.
+  assert.equal(domains.find((d) => d.domain === 'linkedin.com').weightedReach, 1);
 });
 
 test('drill-down lists wins first', () => {

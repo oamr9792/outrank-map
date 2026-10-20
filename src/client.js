@@ -1,6 +1,6 @@
-import { openDb, getClient, getStudy, listTargets, linkTargetStudy, findReusableStudy, saveClientSerp } from './db.js';
+import { openDb, getClient, getStudy, listTargets, linkTargetStudy, findReusableStudy, saveClientSerp, setClientVolume } from './db.js';
 import { createStudy, fetchSerps, estimate, DEFAULTS } from './run.js';
-import { scoreDomains, mergeHosts } from './score.js';
+import { scoreDomains, mergeHosts, PRESETS, bandOf, cleanProfile } from './score.js';
 import { negativeTitle, pageType } from './classify.js';
 import * as dfs from './dataforseo.js';
 
@@ -98,25 +98,57 @@ export async function runClient(clientId, params, log, opts = {}) {
   }
 }
 
+/** One paid call: the client's name search volume, which also sets the band. */
+export async function fetchNameVolume(clientId) {
+  const c = getClient(clientId);
+  if (!c) throw new Error('No such client');
+  dfs.resetSpend();
+  const { cost, volume } = await dfs.searchVolume(c.name, { locationCode: dfs.LOCATION_CODES[c.country] });
+  setClientVolume(clientId, { volume, band: bandOf(volume ?? 0), cost });
+  return { cost, volume };
+}
+
+/**
+ * The situation profile for one host, from that host's own negative URL
+ * (its best-ranked one in the name SERP when there are several): its page
+ * type, live position and negative category, plus the client's volume band.
+ */
+export function hostProfile(client, hostTargets) {
+  if (!hostTargets.length) return {};
+  const ranked = hostTargets.filter((t) => t.position_seen).sort((a, b) => a.position_seen - b.position_seen);
+  const t = ranked[0] ?? hostTargets[0];
+  const row = (client.serp ?? []).find((r) => r.url === t.url);
+  const negative = row ? negativeTitle(row.title) : null;
+  return cleanProfile({
+    pageType: pageType(t.url),
+    position: t.position_seen,
+    volumeBand: client.volume_band,
+    // Until headlines carry categories, a negative headline matches any negative one.
+    category: negative ? negative.category ?? '*' : null,
+  });
+}
+
 /**
  * The merged leaderboard. `load(studyId)` returns a study's keyword data
- * (the server passes its cached loader).
+ * (the server passes its cached loader). mode 'profile' weights each host by
+ * its own profile; a preset name applies that preset to every host.
  */
-export function mergedForClient(clientId, load, { scope = 'all', minContests = 10 } = {}) {
+export function mergedForClient(clientId, load, { mode = 'profile', minContests = 10 } = {}) {
   const c = getClient(clientId);
   if (!c) throw new Error('No such client');
   const hosts = [];
-  const seen = new Set();
-  for (const t of listTargets(clientId)) {
-    if (seen.has(t.domain)) continue;
-    seen.add(t.domain);
-    const study = t.study_id ? getStudy(t.study_id) : null;
+  const targets = listTargets(clientId);
+  for (const domain of [...new Set(targets.map((t) => t.domain))]) {
+    const own = targets.filter((t) => t.domain === domain);
+    const profile = mode === 'profile' ? hostProfile(c, own) : PRESETS[mode] ?? {};
+    const studyId = own.find((t) => t.study_id)?.study_id;
+    const study = studyId ? getStudy(studyId) : null;
     if (!study) {
-      hosts.push({ domain: t.domain, studyId: null, contests: 0, domains: [] });
+      hosts.push({ domain, studyId: null, contests: 0, effectiveContests: 0, profile, domains: [] });
       continue;
     }
-    const scored = scoreDomains(load(study.id), study.target, { scope });
-    hosts.push({ domain: t.domain, studyId: study.id, contests: scored.summary.contests, domains: scored.domains });
+    const scored = scoreDomains(load(study.id), study.target, { profile });
+    hosts.push({ domain, studyId: study.id, contests: scored.summary.contests, effectiveContests: scored.summary.effectiveContests, profile, domains: scored.domains });
   }
   return { client: { id: c.id, name: c.name, country: c.country }, ...mergeHosts(hosts, { nameSerp: c.serp ?? [], minContests }) };
 }

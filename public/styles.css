@@ -96,3 +96,8 @@ textarea { font: inherit; color: var(--ink); background: var(--panel); border: 1
 button.small { padding: 2px 8px; font-size: 12px; margin-left: 6px; }
 td.weak { background: var(--neg-soft); }
 .view .card h2 { font-size: 14px; }
+
+.profile .row { flex-wrap: wrap; margin-top: 8px; }
+.profile .row label { min-width: 140px; }
+.profile .tabs { margin: 4px 0; width: max-content; max-width: 100%; flex-wrap: wrap; }
+select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; }

@@ -7,22 +7,90 @@ import { negativeTitle, pageType, accessTag, section } from './classify.js';
  * Only keywords where the target is still in the live results count: those
  * are the contests. A domain "wins" a keyword when its best organic position
  * is above the target's best.
+ *
+ * Each contest also gets a weight, 0 to 1, for how closely it resembles the
+ * client's situation (the profile). Weighted reach is the weighted share of
+ * contests won: Σ weight of contests won ÷ Σ weight of all contests.
  */
 
 const isTarget = (domain, target) => domain === target || domain.endsWith(`.${target}`);
 
-/** Attaches the target's own result to each keyword and applies the scope. */
-export function contests(keywords, target, { scope = 'all' } = {}) {
+// --- the situation profile ---------------------------------------------------------
+
+/** Monthly search-volume bands, as [low, high). */
+export const VOLUME_BANDS = [
+  [0, 100, '<100'],
+  [100, 1000, '100–1k'],
+  [1000, 10000, '1k–10k'],
+  [10000, Infinity, '10k+'],
+];
+export const bandOf = (volume) => VOLUME_BANDS.findIndex(([lo, hi]) => (volume ?? 0) >= lo && (volume ?? 0) < hi);
+
+/**
+ * Component weights from the brief; tune here. A component only counts when
+ * the profile sets it, and the weight is normalised over the components that
+ * are set — so a profile of page type alone weights each contest 1 or 0.
+ */
+export const WEIGHTS = { pageType: 0.4, position: 0.3, volumeBand: 0.2, category: 0.1 };
+export const POSITION_WINDOW = 3;
+
+/**
+ * The old scopes, kept as presets. Each sets one component, so its weighted
+ * reach equals the reach the scope used to give by filtering.
+ * category '*' matches any negative headline.
+ */
+export const PRESETS = {
+  all: {},
+  negative: { category: '*' },
+  article: { pageType: 'article' },
+};
+
+/** Drops unknown or empty fields so a profile can come straight from a request. */
+export function cleanProfile(p = {}) {
+  const out = {};
+  if (typeof p.pageType === 'string' && p.pageType) out.pageType = p.pageType.slice(0, 20);
+  if (Number(p.position) > 0) out.position = Math.floor(Number(p.position));
+  const band = p.volumeBand === '' || p.volumeBand == null ? NaN : Number(p.volumeBand);
+  if (Number.isInteger(band) && band >= 0 && band < VOLUME_BANDS.length) out.volumeBand = band;
+  if (typeof p.category === 'string' && p.category) out.category = p.category.slice(0, 40);
+  return out;
+}
+
+/** A contest's category: its negative word's category once item 3 adds them. */
+const categoryOf = (negative) => (negative ? negative.category ?? 'negative' : null);
+
+/**
+ * How closely one contest matches the profile. Returns the weight and, per
+ * component that the profile sets, whether it matched — for the drill-down.
+ */
+export function contestWeight(k, profile = {}) {
+  const parts = {};
+  if (profile.pageType) parts.pageType = k.target.type === profile.pageType;
+  if (profile.position) parts.position = Math.abs(k.target.position - profile.position) <= POSITION_WINDOW;
+  if (profile.volumeBand != null) parts.volumeBand = bandOf(k.volume) === profile.volumeBand;
+  if (profile.category) {
+    const c = categoryOf(k.target.negative);
+    parts.category = profile.category === '*' ? c !== null : c === profile.category;
+  }
+  const set = Object.keys(parts);
+  if (!set.length) return { weight: 1, parts };
+  const max = set.reduce((a, key) => a + WEIGHTS[key], 0);
+  const got = set.reduce((a, key) => a + (parts[key] ? WEIGHTS[key] : 0), 0);
+  return { weight: got / max, parts };
+}
+
+// --- contests and scores -------------------------------------------------------------
+
+/** Attaches the target's own result and the contest's weight to each keyword. */
+export function contests(keywords, target, { profile = {} } = {}) {
   const out = [];
   for (const k of keywords) {
     const mine = k.results.filter((r) => isTarget(r.domain, target));
     if (!mine.length) continue;
     const best = mine.reduce((a, b) => (b.position < a.position ? b : a));
-    const negative = negativeTitle(best.title);
-    const type = pageType(best.url);
-    if (scope === 'negative' && !negative) continue;
-    if (scope === 'article' && type !== 'article') continue;
-    out.push({ ...k, target: { position: best.position, url: best.url, title: best.title, negative, type } });
+    const c = { ...k, target: { position: best.position, url: best.url, title: best.title, negative: negativeTitle(best.title), type: pageType(best.url) } };
+    const { weight, parts } = contestWeight(c, profile);
+    out.push({ ...c, weight, parts });
   }
   return out;
 }
@@ -38,17 +106,19 @@ function bestByDomain(results, target) {
   return best;
 }
 
-export function scoreDomains(keywords, target, { scope = 'all', minAppearances = 1 } = {}) {
-  const set = contests(keywords, target, { scope });
+export function scoreDomains(keywords, target, { profile = {}, minAppearances = 1 } = {}) {
+  const set = contests(keywords, target, { profile });
+  const totalWeight = set.reduce((a, k) => a + k.weight, 0);
   const agg = new Map();
   for (const k of set) {
     const tpos = k.target.position;
     for (const [domain, r] of bestByDomain(k.results, target)) {
       let a = agg.get(domain);
-      if (!a) agg.set(domain, (a = { domain, appearances: 0, wins: 0, gap: 0, volumeWon: 0, top3Wins: 0, people: new Set(), types: {}, sections: {} }));
+      if (!a) agg.set(domain, (a = { domain, appearances: 0, wins: 0, weightWon: 0, gap: 0, volumeWon: 0, top3Wins: 0, people: new Set(), types: {}, sections: {} }));
       a.appearances++;
       if (r.position < tpos) {
         a.wins++;
+        a.weightWon += k.weight;
         a.gap += tpos - r.position;
         a.volumeWon += k.volume;
         if (r.position <= 3) a.top3Wins++;
@@ -67,9 +137,11 @@ export function scoreDomains(keywords, target, { scope = 'all', minAppearances =
       domain: a.domain,
       wins: a.wins,
       appearances: a.appearances,
-      // Share of every contest in scope that this domain won: "how regularly
-      // it outranks the target", including contests it was absent from.
+      // Share of every contest that this domain won: "how regularly it
+      // outranks the target", including contests it was absent from.
       reach: n ? a.wins / n : 0,
+      // The same, with each contest counted by its similarity to the profile.
+      weightedReach: totalWeight ? a.weightWon / totalWeight : 0,
       // Head-to-head: when both appear, how often it is above. Smoothed
       // (Laplace) so 1-for-1 does not read as 100%.
       winRate: (a.wins + 1) / (a.appearances + 2),
@@ -82,26 +154,29 @@ export function scoreDomains(keywords, target, { scope = 'all', minAppearances =
       sections: Object.entries(a.sections).sort((x, y) => y[1] - x[1]).slice(0, 4),
       access: accessTag(a.domain),
     }))
-    .sort((x, y) => y.wins - x.wins || y.winRate - x.winRate || y.volumeWon - x.volumeWon);
+    .sort((x, y) => y.weightedReach - x.weightedReach || y.wins - x.wins || y.winRate - x.winRate || y.volumeWon - x.volumeWon);
 
   const positions = set.map((k) => k.target.position);
   return {
     summary: {
       keywords: keywords.length,
       contests: n,
-      targetAbsent: keywords.length - contests(keywords, target).length,
+      // Σ weights: how many full matches the weighted figures rest on.
+      effectiveContests: totalWeight,
+      targetAbsent: keywords.length - n,
       targetAvgPosition: n ? positions.reduce((a, b) => a + b, 0) / n : null,
       targetTop3: positions.filter((p) => p <= 3).length,
       negativeContests: set.filter((k) => k.target.negative).length,
     },
+    profile,
     domains,
   };
 }
 
-/** Every contest a domain took part in, wins first, for the drill-down. */
-export function domainDetail(keywords, target, domain, { scope = 'all' } = {}) {
+/** Every contest a domain took part in, wins first, with each contest's weight. */
+export function domainDetail(keywords, target, domain, { profile = {} } = {}) {
   const rows = [];
-  for (const k of contests(keywords, target, { scope })) {
+  for (const k of contests(keywords, target, { profile })) {
     const r = bestByDomain(k.results, target).get(domain);
     if (!r) continue;
     rows.push({
@@ -109,11 +184,13 @@ export function domainDetail(keywords, target, domain, { scope = 'all' } = {}) {
       people: k.people,
       volume: k.volume,
       outcome: r.position < k.target.position ? 'win' : 'loss',
+      weight: k.weight,
+      parts: k.parts,
       target: k.target,
       them: { position: r.position, url: r.url, title: r.title, type: pageType(r.url) },
     });
   }
-  return rows.sort((a, b) => (a.outcome === b.outcome ? b.volume - a.volume : a.outcome === 'win' ? -1 : 1));
+  return rows.sort((a, b) => (a.outcome === b.outcome ? b.weight - a.weight || b.volume - a.volume : a.outcome === 'win' ? -1 : 1));
 }
 
 /**
@@ -158,13 +235,14 @@ export function mergeHosts(hosts, { nameSerp = [], minContests = 10 } = {}) {
       if (isHost(d.domain)) continue;
       if (!candidates.has(d.domain)) candidates.set(d.domain, { domain: d.domain, access: d.access, perHost: {}, types: {} });
       const c = candidates.get(d.domain);
-      c.perHost[h.domain] = { reach: d.reach, wins: d.wins, appearances: d.appearances, contests: h.contests };
+      // Weighted when the host was scored against a profile; plain reach otherwise.
+      c.perHost[h.domain] = { reach: d.weightedReach ?? d.reach, rawReach: d.reach, wins: d.wins, appearances: d.appearances, contests: h.contests };
       for (const [t, n] of Object.entries(d.types)) c.types[t] = (c.types[t] ?? 0) + n;
     }
   }
 
   const domains = [...candidates.values()].map((c) => {
-    for (const h of hosts) c.perHost[h.domain] ??= { reach: 0, wins: 0, appearances: 0, contests: h.contests };
+    for (const h of hosts) c.perHost[h.domain] ??= { reach: 0, rawReach: 0, wins: 0, appearances: 0, contests: h.contests };
     let merged = null;
     let hardestHost = null;
     for (const h of counted) {
@@ -191,7 +269,7 @@ export function mergeHosts(hosts, { nameSerp = [], minContests = 10 } = {}) {
   );
 
   return {
-    hosts: hosts.map((h) => ({ domain: h.domain, studyId: h.studyId, contests: h.contests, counted: countedSet.has(h.domain) })),
+    hosts: hosts.map((h) => ({ domain: h.domain, studyId: h.studyId, contests: h.contests, effectiveContests: h.effectiveContests ?? h.contests, profile: h.profile ?? {}, counted: countedSet.has(h.domain) })),
     domains,
   };
 }

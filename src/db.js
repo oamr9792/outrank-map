@@ -79,6 +79,11 @@ const MIGRATIONS = [
   // Set on studies the client flow created. A reused study keeps its own
   // (possibly null) client_id; client_targets.study_id is the link either way.
   'ALTER TABLE studies ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL',
+  // Hand-entered situation profile for the single-domain flow (JSON).
+  'ALTER TABLE studies ADD COLUMN profile TEXT',
+  // The client's name search volume: fetched (volume) or picked by hand (band).
+  'ALTER TABLE clients ADD COLUMN volume INTEGER',
+  'ALTER TABLE clients ADD COLUMN volume_band INTEGER',
 ];
 
 let db;
@@ -135,15 +140,16 @@ export function listStudies() {
 
 export function getStudy(id) {
   const s = openDb().prepare('SELECT * FROM studies WHERE id = ?').get(id);
-  return s ? { ...s, params: JSON.parse(s.params) } : null;
+  return s ? { ...s, params: JSON.parse(s.params), profile: s.profile ? JSON.parse(s.profile) : {} } : null;
 }
 
 export function deleteStudy(id) {
   openDb().prepare('DELETE FROM studies WHERE id = ?').run(id);
 }
 
-export function updateStudy(id, { name, notes }) {
+export function updateStudy(id, { name, notes, profile }) {
   const d = openDb();
+  if (profile !== undefined) d.prepare('UPDATE studies SET profile = ? WHERE id = ?').run(JSON.stringify(profile ?? {}), id);
   if (name !== undefined) d.prepare('UPDATE studies SET name = ? WHERE id = ?').run(String(name).trim().slice(0, 200) || null, id);
   if (notes !== undefined) d.prepare('UPDATE studies SET notes = ? WHERE id = ?').run(String(notes).slice(0, 20000), id);
 }
@@ -247,4 +253,11 @@ export function findReusableStudy(domain, country) {
       )
       .get(domain, country)?.id ?? null
   );
+}
+
+/** volume: a fetched figure or null; band: an index into VOLUME_BANDS or null. */
+export function setClientVolume(id, { volume, band, cost = 0 }) {
+  const d = openDb();
+  if (volume !== undefined) d.prepare('UPDATE clients SET volume = ? WHERE id = ?').run(volume, id);
+  d.prepare('UPDATE clients SET volume_band = ?, serp_cost = serp_cost + ? WHERE id = ?').run(band ?? null, cost, id);
 }

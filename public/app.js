@@ -49,7 +49,7 @@ $('#logout').addEventListener('click', async () => {
   showLogin();
 });
 
-const state = { studyId: null, scope: 'all', min: 2, sort: 'wins', dir: -1, filter: '', domain: null, data: null, picks: new Map(), view: 'table', clientId: null, cdata: null, merged: null, cDomain: null, rerun: new Set(), defaults: null };
+const state = { studyId: null, scope: 'all', pMode: 'saved', pCustom: {}, cMode: 'profile', min: 2, sort: 'weightedReach', dir: -1, filter: '', domain: null, data: null, picks: new Map(), view: 'table', clientId: null, cdata: null, merged: null, cDomain: null, rerun: new Set(), defaults: null };
 const SCOPES = [
   ['all', 'All person searches'],
   ['negative', 'Target page reads negative'],
@@ -58,6 +58,7 @@ const SCOPES = [
 const COLS = [
   ['picked', '★', false],
   ['domain', 'Domain', false],
+  ['weightedReach', 'Weighted reach', true],
   ['wins', 'Wins', true],
   ['reach', 'Reach', true],
   ['rawWinRate', 'Head-to-head', true],
@@ -69,6 +70,44 @@ const COLS = [
   ['access', 'Access', false],
   ['types', 'Winning page types', false],
 ];
+
+// ---- situation profile ---------------------------------------------------------
+const VOLUME_LABELS = ['<100', '100–1k', '1k–10k', '10k+'];
+const PAGE_TYPES = ['article', 'profile', 'forum', 'social', 'video', 'wiki', 'other'];
+const PART_LABEL = { pageType: 'page type', position: 'position ±3', volumeBand: 'volume band', category: 'negative category' };
+
+function profileLabel(p = {}) {
+  const bits = [];
+  if (p.pageType) bits.push(p.pageType);
+  if (p.position) bits.push(`#${p.position} ±3`);
+  if (p.volumeBand != null) bits.push(`${VOLUME_LABELS[p.volumeBand]} searches`);
+  if (p.category) bits.push(p.category === '*' ? 'negative headline' : p.category);
+  return bits.length ? bits.join(' · ') : 'every contest weighs 1';
+}
+
+/** Why a contest weighs what it does, for the drill-down's tooltip. */
+const partsLabel = (parts = {}) =>
+  Object.keys(parts).length ? Object.entries(parts).map(([k, ok]) => `${PART_LABEL[k]} ${ok ? '✓' : '✗'}`).join(' · ') : 'no profile set: weight 1';
+
+/** The study's profile choice as a query string: saved, a preset, or custom. */
+function profileQuery() {
+  if (state.pMode === 'custom') return `profile=${encodeURIComponent(JSON.stringify(state.pCustom))}`;
+  if (state.pMode && state.pMode !== 'saved') return `scope=${state.pMode}`;
+  return '';
+}
+
+function profileFields(p = {}, idPrefix = 'pf') {
+  return `<label>Page type <select id="${idPrefix}Type"><option value="">any</option>${PAGE_TYPES.map((t) => `<option ${p.pageType === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    <label>Target at # <input id="${idPrefix}Pos" type="number" min="1" max="100" value="${p.position ?? ''}" placeholder="any"></label>
+    <label>Volume band <select id="${idPrefix}Vol"><option value="">any</option>${VOLUME_LABELS.map((l, i) => `<option value="${i}" ${p.volumeBand === i ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <label>Negative category <select id="${idPrefix}Cat"><option value="">any</option><option value="*" ${p.category === '*' ? 'selected' : ''}>any negative headline</option></select></label>`;
+}
+const readProfileFields = (idPrefix = 'pf') => ({
+  pageType: $(`#${idPrefix}Type`).value || undefined,
+  position: $(`#${idPrefix}Pos`).value || undefined,
+  volumeBand: $(`#${idPrefix}Vol`).value === '' ? undefined : Number($(`#${idPrefix}Vol`).value),
+  category: $(`#${idPrefix}Cat`).value || undefined,
+});
 
 // ---- status / studies / job ---------------------------------------------
 let polling = null;
@@ -140,6 +179,7 @@ $('#studies').addEventListener('click', async (e) => {
   if (!li) return;
   state.studyId = Number(li.dataset.id);
   state.clientId = null;
+  state.pMode = 'saved';
   state.domain = null;
   state.view = 'table';
   refreshStatus();
@@ -172,7 +212,7 @@ form.addEventListener('submit', async (e) => {
 // ---- study view -----------------------------------------------------------
 async function loadStudy() {
   const id = state.studyId;
-  const d = await api(`/api/studies/${id}/domains?scope=${state.scope}&min=${state.min}`).catch((err) => ({ error: err.message }));
+  const d = await api(`/api/studies/${id}/domains?${profileQuery()}&min=${state.min}`).catch((err) => ({ error: err.message }));
   if (id !== state.studyId) return;
   if (d.error) return ($('#view').innerHTML = `<div class="empty">${esc(d.error)}</div>`);
   state.data = d;
@@ -191,27 +231,46 @@ function renderStudy() {
       <div class="muted">${esc(study.target)} · ${esc(study.country.toUpperCase())} · ${wordsLabel(p)} person keywords · target pos ≤ ${p.maxPosition}${p.minVolume ? ` · vol ≥ ${p.minVolume}` : ''}${p.maxVolume ? ` · vol ≤ ${p.maxVolume}` : ''} · ${num(study.ahrefs_units)} Ahrefs units · $${study.dfs_cost.toFixed(2)} DataForSEO</div></div>
     <textarea id="studyNotes" rows="2" placeholder="Notes on this study (saved automatically)">${esc(study.notes || '')}</textarea>
     <div class="stats">
-      <div class="stat"><b>${num(summary.contests)}</b><span>contests in scope<br>(target in live top ${p.depth})</span></div>
+      <div class="stat"><b>${num(summary.contests)}</b><span>contests<br>(target in live top ${p.depth})</span></div>
+      <div class="stat"><b>${summary.effectiveContests.toFixed(1)}</b><span>effective contests<br>(sum of weights)</span></div>
       <div class="stat"><b>${summary.targetAvgPosition?.toFixed(1) ?? '–'}</b><span>target's avg position</span></div>
       <div class="stat"><b>${num(summary.targetTop3)}</b><span>target in top 3</span></div>
       <div class="stat"><b>${num(summary.negativeContests)}</b><span>target page reads negative</span></div>
       <div class="stat"><b>${num(summary.targetAbsent)}</b><span>of ${num(summary.keywords)} SERPs: target gone since Ahrefs saw it</span></div>
     </div>
+    <section class="card profile">
+      <h2>Situation profile <span class="muted">— weights each contest by how much it looks like your client's case</span></h2>
+      <div class="tabs" id="pPresets">${[['saved', "Study's saved profile"], ...SCOPES, ['custom', 'Custom']].map(([k, l]) => `<button data-p="${k}" class="${k === state.pMode ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <p class="muted">In use: <b>${esc(profileLabel(state.data.profile))}</b>. Weights: page type 0.4 · target position within ±3 0.3 · volume band 0.2 · negative category 0.1; only the parts you set count, so a single part gives weights of 1 or 0.</p>
+      <div class="row" id="pFields" ${state.pMode === 'custom' ? '' : 'hidden'}>${profileFields(state.pMode === 'custom' ? state.pCustom : state.data.profile)}</div>
+      <div class="toolbar" style="margin:0"><button class="ghost" id="pApply" ${state.pMode === 'custom' ? '' : 'hidden'}>Apply</button>
+        <button class="ghost" id="pSave" title="Use this profile whenever the study opens">Save as the study's profile</button></div>
+    </section>
     <div class="toolbar">
-      <div class="tabs">${SCOPES.map(([k, l]) => `<button data-scope="${k}" class="${k === state.scope ? 'on' : ''}">${l}</button>`).join('')}</div>
       <label style="flex:0;flex-direction:row;align-items:center;gap:6px;margin:0">Seen with target ≥ <input id="min" type="number" min="1" value="${state.min}" style="width:60px"></label>
       <input id="filter" placeholder="Filter domains" value="${esc(state.filter)}">
       <button id="openReport">Report (${state.picks.size} shortlisted)</button>
-      <a class="btn ghost" href="/api/studies/${study.id}/export.csv?scope=${state.scope}">CSV</a>
+      <a class="btn ghost" href="/api/studies/${study.id}/export.csv?${profileQuery()}">CSV</a>
       <button class="ghost" id="resume" title="Fetch any missing or failed SERPs">Resume / retry</button>
     </div>
     <div class="tablewrap"><table id="domains"><thead></thead><tbody></tbody></table></div>
-    <p class="muted">Wins = searches where the domain's best organic result is above the target's. Reach = wins ÷ all contests in scope (how regularly it beats the target). Head-to-head = wins ÷ searches where both appear. Page types and the negative-headline flag are rule-based guesses.</p>
+    <p class="muted">Wins = searches where the domain's best organic result is above the target's. Reach = wins ÷ all contests (how regularly it beats the target). Weighted reach = the same with each contest counted by its weight, so wins on searches like your client's count most. Head-to-head = wins ÷ searches where both appear. Page types and the negative-headline flag are rule-based guesses.</p>
     <div id="detail" class="detail"></div>`;
-  $('.tabs').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-scope]');
+  $('#pPresets').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-p]');
     if (!b) return;
-    state.scope = b.dataset.scope;
+    if (b.dataset.p === 'custom' && state.pMode !== 'custom') state.pCustom = { ...state.data.profile };
+    state.pMode = b.dataset.p;
+    loadStudy();
+  });
+  $('#pApply').addEventListener('click', () => {
+    state.pCustom = readProfileFields();
+    loadStudy();
+  });
+  $('#pSave').addEventListener('click', async () => {
+    const profile = state.pMode === 'custom' ? readProfileFields() : state.data.profile;
+    await api(`/api/studies/${study.id}`, { method: 'PATCH', body: JSON.stringify({ profile }) }).catch((err) => alert(err.message));
+    state.pMode = 'saved';
     loadStudy();
   });
   $('#min').addEventListener('change', (e) => {
@@ -256,6 +315,7 @@ function renderTable() {
           (d) => `<tr data-d="${esc(d.domain)}" class="${d.domain === state.domain ? 'on' : ''}">
       <td><button class="star ${d.picked ? 'on' : ''}" data-star="${esc(d.domain)}" title="${d.picked ? 'Remove from shortlist' : 'Add to shortlist'}">${d.picked ? '★' : '☆'}</button></td>
       <td>${esc(d.domain)}</td>
+      <td class="num"><b>${pct(d.weightedReach)}</b></td>
       <td class="num">${d.wins}<span class="bar" style="width:${(d.wins / max) * 60}px"></span></td>
       <td class="num">${pct(d.reach)}</td>
       <td class="num" title="${d.wins} of ${d.appearances}">${pct(d.rawWinRate)}</td>
@@ -287,7 +347,7 @@ function renderTable() {
 async function loadDomain(domain, scroll) {
   state.domain = domain;
   document.querySelectorAll('#domains tbody tr').forEach((tr) => tr.classList.toggle('on', tr.dataset.d === domain));
-  const { rows } = await api(`/api/studies/${state.studyId}/domain?d=${encodeURIComponent(domain)}&scope=${state.scope}`);
+  const { rows } = await api(`/api/studies/${state.studyId}/domain?d=${encodeURIComponent(domain)}&${profileQuery()}`);
   const agg = state.data.domains.find((d) => d.domain === domain);
   const wins = rows.filter((r) => r.outcome === 'win');
   const picked = state.picks.has(domain);
@@ -297,11 +357,12 @@ async function loadDomain(domain, scroll) {
       <button id="pickBtn" class="${picked ? 'ghost' : ''}">${picked ? '★ Shortlisted — remove' : '☆ Add to shortlist'}</button></div>
     ${picked ? `<textarea id="pickNote" rows="2" placeholder="Why this domain, angle, contact, status… (saved automatically)">${esc(state.picks.get(domain))}</textarea>` : ''}
     <div class="tablewrap"><table>
-      <thead><tr><th>Search</th><th class="num">Vol</th><th class="num">Them</th><th>Their page</th><th class="num">Target</th><th>Target's page</th></tr></thead>
+      <thead><tr><th>Search</th><th class="num" title="How much this contest counts toward weighted reach">Weight</th><th class="num">Vol</th><th class="num">Them</th><th>Their page</th><th class="num">Target</th><th>Target's page</th></tr></thead>
       <tbody>${rows
         .map(
           (r) => `<tr class="${r.outcome}">
         <td>${esc(r.keyword)}${r.outcome === 'win' ? ' <span class="tag win">win</span>' : ''}</td>
+        <td class="num" title="${esc(partsLabel(r.parts))}">${r.weight.toFixed(2)}</td>
         <td class="num">${num(r.volume)}</td>
         <td class="num pos">${r.them.position}</td>
         <td><a href="${href(r.them.url)}" target="_blank" rel="noopener noreferrer">${esc(r.them.title || r.them.url)}</a> <span class="tag">${esc(r.them.type)}</span><div class="u">${esc(r.them.url)}</div></td>
@@ -331,21 +392,21 @@ async function togglePick(domain) {
 }
 
 async function loadReport() {
-  const r = await api(`/api/studies/${state.studyId}/report?scope=${state.scope}`);
+  const r = await api(`/api/studies/${state.studyId}/report?${profileQuery()}`);
   const s = r.study;
-  const scopeLabel = SCOPES.find(([k]) => k === r.scope)[1];
+  const scopeLabel = profileLabel(r.profile);
   $('#view').innerHTML = `
     <div class="toolbar noprint"><button class="ghost" id="back">← Back to study</button><button id="print">Print / save as PDF</button></div>
     <article class="report">
       <h2>${esc(s.name || `Outranking ${s.target}`)}</h2>
-      <p class="muted">Target: ${esc(s.target)} · ${esc(s.country.toUpperCase())} · scope: ${esc(scopeLabel)} · ${num(r.summary.contests)} person-name searches where the target ranks · generated ${new Date().toLocaleDateString()}</p>
+      <p class="muted">Target: ${esc(s.target)} · ${esc(s.country.toUpperCase())} · weighted for: ${esc(scopeLabel)} · ${num(r.summary.contests)} person-name searches where the target ranks · generated ${new Date().toLocaleDateString()}</p>
       ${s.notes ? `<p class="notes">${esc(s.notes)}</p>` : ''}
       ${r.picks.length ? '' : '<p class="empty">Nothing shortlisted yet. Star domains in the study table to add them.</p>'}
       ${r.picks
         .map(
           (p) => `<section class="pick">
         <h3>${esc(p.domain)} ${p.stats?.access ? `<span class="tag">${esc(p.stats.access)}</span>` : ''}</h3>
-        ${p.stats ? `<p class="muted">Beats ${esc(s.target)} on <b>${p.stats.wins}</b> searches (${pct(p.stats.reach)} of all) · head-to-head ${pct(p.stats.rawWinRate)} of ${p.stats.appearances} · ${p.stats.people} distinct people · avg ${p.stats.avgGap.toFixed(1)} positions higher · winning pages: ${Object.entries(p.stats.types).map(([t, n]) => `${esc(t)} ${n}`).join(', ') || 'none'}</p>` : '<p class="muted">Not seen alongside the target in this scope.</p>'}
+        ${p.stats ? `<p class="muted">Weighted reach <b>${pct(p.stats.weightedReach)}</b> · beats ${esc(s.target)} on <b>${p.stats.wins}</b> searches (${pct(p.stats.reach)} of all) · head-to-head ${pct(p.stats.rawWinRate)} of ${p.stats.appearances} · ${p.stats.people} distinct people · avg ${p.stats.avgGap.toFixed(1)} positions higher · winning pages: ${Object.entries(p.stats.types).map(([t, n]) => `${esc(t)} ${n}`).join(', ') || 'none'}</p>` : '<p class="muted">Not seen alongside the target in this scope.</p>'}
         ${p.note ? `<p class="notes">${esc(p.note)}</p>` : ''}
         ${p.wins.length ? `<table><thead><tr><th>Search</th><th class="num">Them</th><th>Winning page</th><th class="num">Target</th></tr></thead><tbody>${p.wins
           .map((w) => `<tr><td>${esc(w.keyword)}</td><td class="num">${w.them.position}</td><td><a href="${href(w.them.url)}" target="_blank" rel="noopener noreferrer">${esc(w.them.title || w.them.url)}</a> <span class="tag">${esc(w.them.type)}</span></td><td class="num">${w.target.position}</td></tr>`)
@@ -441,8 +502,12 @@ function renderClient() {
   const extra = targets.filter((t) => !serp.some((r) => r.url === t.url));
   $('#view').innerHTML = `
     <div class="head"><h3>${esc(client.name)}</h3>
-      <div class="muted">${esc(client.country.toUpperCase())} · name results ${client.serp_at ? `pulled ${new Date(client.serp_at).toLocaleString()}` : 'not pulled yet'} · $${(client.serp_cost ?? 0).toFixed(3)}
-        <button class="ghost small" id="cResearch">Re-pull name results</button></div></div>
+      <div class="muted">${esc(client.country.toUpperCase())} · name results ${client.serp_at ? `pulled ${new Date(client.serp_at).toLocaleString()}` : 'not pulled yet'} · $${(client.serp_cost ?? 0).toFixed(3)} DataForSEO spent
+        <button class="ghost small" id="cResearch">Re-pull name results</button></div>
+      <div class="row" style="align-items:flex-end;max-width:620px;margin-top:6px">
+        <label>Name's search volume band <select id="cBand"><option value="">any (not used in weighting)</option>${state.cdata.volumeBands.map((l, i) => `<option value="${i}" ${client.volume_band === i ? 'selected' : ''}>${l} searches a month</option>`).join('')}</select></label>
+        <span class="muted" style="flex:1">${client.volume != null ? `Fetched: ${num(client.volume)} a month.` : 'Pick a band, or fetch the figure.'}</span>
+        <button class="ghost small" id="cVolume">Fetch volume (~$${state.cdata.volumeTaskUsd.toFixed(3)})</button></div></div>
 
     <section class="card"><h2>1 · Google results for “${esc(client.name)}”</h2>
       <p class="muted">Tick the results that are the problem. Headlines that match the negative word list are flagged; it is a rule-based guess, so check each one.</p>
@@ -468,8 +533,9 @@ function renderClient() {
     <section class="card"><h2>2 · Studies per host</h2><div id="cPlan"></div></section>
 
     <section class="card"><h2>3 · Domains that beat every host</h2>
-      <p class="muted">Merged = the domain's reach against the host it does worst against. It is inferred from how each domain does against these hosts on other people's names, not a prediction for ${esc(client.name)}'s own results. ★ = already in ${esc(client.name)}'s name results: a property to strengthen, sorted first at equal score.</p>
-      <div class="toolbar"><div class="tabs" id="cScopes">${SCOPES.map(([k, l]) => `<button data-scope="${k}" class="${k === state.scope ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <p class="muted">Merged = the domain's weighted reach against the host it does worst against. It is inferred from how each domain does against these hosts on other people's names, not a prediction for ${esc(client.name)}'s own results. ★ = already in ${esc(client.name)}'s name results: a property to strengthen, sorted first at equal score.</p>
+      <p class="muted">Situation profile (default): each host's contests are weighted by that host's own negative URL — its page type, position and headline — plus the name's volume band. A preset applies the same weighting to every host.</p>
+      <div class="toolbar"><div class="tabs" id="cScopes">${[['profile', 'Situation profile'], ...SCOPES].map(([k, l]) => `<button data-scope="${k}" class="${k === state.cMode ? 'on' : ''}">${l}</button>`).join('')}</div>
         <input id="cFilter" placeholder="Filter domains" value="${esc(state.filter)}"></div>
       <div class="tablewrap"><table id="cMerged"><thead></thead><tbody></tbody></table></div>
       <div id="cDetail" class="detail"></div>
@@ -512,10 +578,20 @@ function renderClient() {
     refreshStatus();
     if (!polling) polling = setInterval(tick, 3000);
   };
+  $('#cBand').onchange = async (e) => {
+    await api(`/api/clients/${state.clientId}`, { method: 'PATCH', body: JSON.stringify({ volumeBand: e.target.value }) }).catch((err) => alert(err.message));
+    loadClient(true);
+  };
+  $('#cVolume').onclick = async () => {
+    if (!confirm(`Look up the monthly Google search volume for "${client.name}"? One DataForSEO call, about $${state.cdata.volumeTaskUsd.toFixed(3)}. It also sets the band.`)) return;
+    await api(`/api/clients/${state.clientId}/volume`, { method: 'POST' }).catch((err) => alert(err.message));
+    refreshStatus();
+    if (!polling) polling = setInterval(tick, 3000);
+  };
   $('#cScopes').onclick = (e) => {
     const b = e.target.closest('[data-scope]');
     if (!b) return;
-    state.scope = b.dataset.scope;
+    state.cMode = b.dataset.scope;
     document.querySelectorAll('#cScopes button').forEach((x) => x.classList.toggle('on', x === b));
     loadMerged();
   };
@@ -590,7 +666,7 @@ async function renderPlan() {
 
 async function loadMerged() {
   const id = state.clientId;
-  const m = await api(`/api/clients/${id}/merged?scope=${state.scope}`).catch((err) => ({ error: err.message }));
+  const m = await api(`/api/clients/${id}/merged?mode=${state.cMode}`).catch((err) => ({ error: err.message }));
   if (id !== state.clientId || !$('#cMerged')) return;
   if (m.error) return ($('#cMerged tbody').innerHTML = `<tr><td class="muted">${esc(m.error)}</td></tr>`);
   state.merged = m;
@@ -603,7 +679,7 @@ function renderMerged() {
   const f = state.filter.trim().toLowerCase();
   const rows = domains.filter((d) => !f || d.domain.includes(f)).slice(0, 300);
   $('#cMerged thead').innerHTML = `<tr><th>Domain</th><th class="num">Merged reach</th><th class="num">In name results</th>
-    ${hosts.map((h) => `<th class="num" title="${h.counted ? '' : 'Too few searches to count toward the merged score'}">vs ${esc(h.domain)}<br><span class="muted">${h.studyId ? `${h.contests} searches${h.counted ? '' : ' · not counted'}` : 'not studied yet'}</span></th>`).join('')}
+    ${hosts.map((h) => `<th class="num" title="${h.counted ? '' : 'Too few searches to count toward the merged score'}">vs ${esc(h.domain)}<br><span class="muted">${h.studyId ? `${h.contests} searches (${h.effectiveContests.toFixed(1)} effective)${h.counted ? '' : ' · not counted'}` : 'not studied yet'}</span><br><span class="muted" title="Weighting profile for this host">${esc(profileLabel(h.profile))}</span></th>`).join('')}
     <th class="num">Total wins</th><th>Access</th><th>Winning page types</th></tr>`;
   $('#cMerged tbody').innerHTML = rows.length
     ? rows
@@ -612,7 +688,7 @@ function renderMerged() {
         <td>${d.inNameSerp ? '<span class="star on" title="Already in the name results">★</span> ' : ''}${esc(d.domain)}</td>
         <td class="num"><b>${pct(d.merged)}</b></td>
         <td class="num">${d.inNameSerp ? `#${d.inNameSerp}` : '–'}</td>
-        ${hosts.map((h) => { const p = d.perHost[h.domain]; return `<td class="num ${h.domain === d.hardestHost && hosts.length > 1 ? 'weak' : ''}" title="${p.wins} wins of ${p.contests} searches">${h.studyId ? pct(p.reach) : '–'}</td>`; }).join('')}
+        ${hosts.map((h) => { const p = d.perHost[h.domain]; return `<td class="num ${h.domain === d.hardestHost && hosts.length > 1 ? 'weak' : ''}" title="weighted ${pct(p.reach)} · plain ${pct(p.rawReach ?? p.reach)} · ${p.wins} wins of ${p.contests} searches">${h.studyId ? pct(p.reach) : '–'}</td>`; }).join('')}
         <td class="num">${d.totalWins}</td>
         <td>${d.access ? `<span class="tag">${esc(d.access)}</span>` : ''}</td>
         <td>${Object.entries(d.types).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t, n]) => `<span class="tag">${esc(t)} ${n}</span>`).join('')}</td></tr>`,
@@ -633,7 +709,7 @@ async function loadClientDomain(domain, scroll) {
   const parts = await Promise.all(
     state.merged.hosts
       .filter((h) => h.studyId)
-      .map(async (h) => ({ h, rows: (await api(`/api/studies/${h.studyId}/domain?d=${encodeURIComponent(domain)}&scope=${state.scope}`)).rows })),
+      .map(async (h) => ({ h, rows: (await api(`/api/studies/${h.studyId}/domain?d=${encodeURIComponent(domain)}&profile=${encodeURIComponent(JSON.stringify(h.profile ?? {}))}`)).rows })),
   );
   $('#cDetail').innerHTML = `
     <div class="head"><h3>${esc(domain)}</h3>
@@ -642,8 +718,8 @@ async function loadClientDomain(domain, scroll) {
       .map(({ h, rows }) => {
         const wins = rows.filter((r) => r.outcome === 'win');
         return `<h2 style="margin-top:12px">vs ${esc(h.domain)}: ${wins.length} wins of ${rows.length} shared searches</h2>
-        ${wins.length ? `<div class="tablewrap"><table><thead><tr><th>Search</th><th class="num">Them</th><th>Their page</th><th class="num">${esc(h.domain)}</th></tr></thead><tbody>
-        ${wins.slice(0, 15).map((r) => `<tr><td>${esc(r.keyword)}</td><td class="num pos">${r.them.position}</td><td><a href="${href(r.them.url)}" target="_blank" rel="noopener noreferrer">${esc(r.them.title || r.them.url)}</a> <span class="tag">${esc(r.them.type)}</span></td><td class="num pos">${r.target.position}</td></tr>`).join('')}
+        ${wins.length ? `<div class="tablewrap"><table><thead><tr><th>Search</th><th class="num">Weight</th><th class="num">Them</th><th>Their page</th><th class="num">${esc(h.domain)}</th></tr></thead><tbody>
+        ${wins.slice(0, 15).map((r) => `<tr><td>${esc(r.keyword)}</td><td class="num" title="${esc(partsLabel(r.parts))}">${r.weight.toFixed(2)}</td><td class="num pos">${r.them.position}</td><td><a href="${href(r.them.url)}" target="_blank" rel="noopener noreferrer">${esc(r.them.title || r.them.url)}</a> <span class="tag">${esc(r.them.type)}</span></td><td class="num pos">${r.target.position}</td></tr>`).join('')}
         </tbody></table></div>${wins.length > 15 ? `<p class="muted">${wins.length - 15} more in <a href="#" data-open-study="${h.studyId}">study #${h.studyId}</a>.</p>` : ''}` : '<p class="muted">No wins against this host.</p>'}`;
       })
       .join('')}`;

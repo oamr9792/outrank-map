@@ -26,11 +26,21 @@ name too, if it carried a piece about them.
    - **Head-to-head** — wins ÷ contests where both appear
    - **Distinct people**, **avg gap** (positions above), **top-3 wins**,
      **volume won**, winning **page types** and winning site **sections**
-4. **Scopes.** *All person searches*; *target page reads negative* (headline
-   matches a lawsuit/fraud/sentenced/foreclosure… lexicon — the closest
-   analogue to a client's situation); *target page is an article*.
+4. **Situation profile and weighted reach.** Each contest gets a weight, 0
+   to 1, for how much it looks like the client's case: the target page's type
+   (0.4), its position within ±3 of the client's negative page (0.3), the
+   keyword's volume band (0.2) and the negative category (0.1). Only the parts
+   the profile sets count, normalised over those. **Weighted reach** = Σ weight
+   of contests won ÷ Σ weight of all contests; it is the default sort, shown
+   beside plain reach, with "effective contests" (Σ weights) as its sample
+   size. The old scopes are presets: *All* (no weighting), *Target page reads
+   negative* and *Target page is an article* each set one part, so their
+   weighted reach equals the old filtered reach. A study can save its own
+   profile; in the client flow each host is weighted by its own negative URL
+   plus the name's volume band (picked by hand, or fetched for ~$0.075).
 5. **Drill-down.** Click a domain for every shared search: its URL and title
-   vs the target's, win or loss.
+   vs the target's, win or loss, and the contest's weight with which parts
+   matched.
 
 **Client flow.** Start from a person instead of a domain: enter the client's
 name (and optionally known negative URLs). The app pulls the live name SERP

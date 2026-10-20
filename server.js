@@ -13,11 +13,11 @@ if (process.env.RENDER && !process.env.DB_PATH) {
 }
 installTrustStore((process.env.EXTRA_CA_CERTS || '').split(';').filter(Boolean));
 
-const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick, createClient, getClient, listClients, deleteClient, listTargets, setTargets } = await import('./src/db.js');
+const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick, createClient, getClient, listClients, deleteClient, listTargets, setTargets, setClientVolume } = await import('./src/db.js');
 const clients = await import('./src/client.js');
 const auth = await import('./src/auth.js');
 const { createStudy, fetchSerps, estimate, DEFAULTS } = await import('./src/run.js');
-const { scoreDomains, domainDetail } = await import('./src/score.js');
+const { scoreDomains, domainDetail, cleanProfile, PRESETS, VOLUME_BANDS } = await import('./src/score.js');
 const ahrefs = await import('./src/ahrefs.js');
 const dfs = await import('./src/dataforseo.js');
 
@@ -183,7 +183,7 @@ async function api(req, res, url) {
     const client = getClient(id);
     if (!client) return send(res, 404, { error: 'no such client' });
     const sub = cm[2] ?? '';
-    const scope = ['all', 'negative', 'article'].includes(q.get('scope')) ? q.get('scope') : 'all';
+    const mode = ['profile', ...Object.keys(PRESETS)].includes(q.get('mode')) ? q.get('mode') : 'profile';
     const rerun = (q.get('rerun') ?? '').split(',').filter(Boolean);
 
     if (req.method === 'GET' && !sub) {
@@ -191,7 +191,29 @@ async function api(req, res, url) {
         client: { ...client, serp: clients.annotateSerp(client.serp ?? []) },
         targets: listTargets(id),
         plan: clients.planHosts(id),
+        hostProfiles: Object.fromEntries(
+          [...new Set(listTargets(id).map((t) => t.domain))].map((d) => [d, clients.hostProfile(client, listTargets(id).filter((t) => t.domain === d))]),
+        ),
+        volumeBands: VOLUME_BANDS.map(([, , label]) => label),
+        volumeTaskUsd: dfs.USD_PER_VOLUME_TASK,
       });
+    }
+    if (req.method === 'PATCH' && !sub) {
+      const { volumeBand } = await readJson(req);
+      const band = volumeBand === '' || volumeBand == null ? null : Number(volumeBand);
+      if (band !== null && !(Number.isInteger(band) && band >= 0 && band < VOLUME_BANDS.length)) return send(res, 400, { error: 'bad volume band' });
+      setClientVolume(id, { band });
+      return send(res, 200, { ok: true });
+    }
+    if (req.method === 'POST' && sub === '/volume') {
+      const started = startJob('name-volume', async (log) => {
+        job.clientId = id;
+        log(`Looking up the monthly search volume for "${client.name}"…`);
+        const { cost, volume } = await clients.fetchNameVolume(id);
+        log(`${volume == null ? 'Google reports no volume' : `${volume.toLocaleString()} searches a month`}, $${cost.toFixed(3)}`);
+        log('Done.');
+      });
+      return started ? send(res, 202, { started: true }) : busy();
     }
     if (req.method === 'DELETE' && !sub) {
       if (job.running && job.clientId === id) return busy();
@@ -218,7 +240,7 @@ async function api(req, res, url) {
       return started ? send(res, 202, { started: true }) : busy();
     }
     if (req.method === 'GET' && sub === '/merged') {
-      return send(res, 200, clients.mergedForClient(id, studyData, { scope, minContests: Math.max(1, Number(q.get('minContests') || 10)) }));
+      return send(res, 200, clients.mergedForClient(id, studyData, { mode, minContests: Math.max(1, Number(q.get('minContests') || 10)) }));
     }
     return send(res, 404, { error: 'not found' });
   }
@@ -229,7 +251,21 @@ async function api(req, res, url) {
     const study = getStudy(id);
     if (!study) return send(res, 404, { error: 'no such study' });
     const sub = m[2] ?? '';
-    const scope = ['all', 'negative', 'article'].includes(q.get('scope')) ? q.get('scope') : 'all';
+    // The weighting profile: explicit (?profile=JSON), a preset (?scope=), or
+    // the study's saved one.
+    let profile = study.profile ?? {};
+    let scope = 'profile';
+    if (q.get('profile')) {
+      try {
+        profile = cleanProfile(JSON.parse(q.get('profile')));
+        scope = 'custom';
+      } catch {
+        return send(res, 400, { error: 'profile must be JSON' });
+      }
+    } else if (PRESETS[q.get('scope')]) {
+      scope = q.get('scope');
+      profile = PRESETS[scope];
+    }
 
     if (req.method === 'DELETE' && !sub) {
       if (job.running && job.studyId === id) return send(res, 409, { error: 'this study is being fetched' });
@@ -238,7 +274,9 @@ async function api(req, res, url) {
       return send(res, 200, { ok: true });
     }
     if (req.method === 'PATCH' && !sub) {
-      updateStudy(id, await readJson(req));
+      const body = await readJson(req);
+      if (body.profile !== undefined) body.profile = cleanProfile(body.profile);
+      updateStudy(id, body);
       return send(res, 200, { study: getStudy(id) });
     }
     if (sub === '/picks') {
@@ -252,14 +290,14 @@ async function api(req, res, url) {
     }
     if (req.method === 'GET' && sub === '/report') {
       const data = studyData(id);
-      const { summary, domains } = scoreDomains(data, study.target, { scope });
+      const { summary, domains } = scoreDomains(data, study.target, { profile });
       const byDomain = new Map(domains.map((d) => [d.domain, d]));
       const picks = listPicks(id).map((p) => ({
         ...p,
         stats: byDomain.get(p.domain) ?? null,
-        wins: domainDetail(data, study.target, p.domain, { scope }).filter((r) => r.outcome === 'win').slice(0, 8),
+        wins: domainDetail(data, study.target, p.domain, { profile }).filter((r) => r.outcome === 'win').slice(0, 8),
       }));
-      return send(res, 200, { study, scope, summary, picks });
+      return send(res, 200, { study, scope, profile, summary, picks });
     }
     if (route.startsWith('POST') && sub === '/resume') {
       const started = startJob('resume', async (log) => {
@@ -270,19 +308,19 @@ async function api(req, res, url) {
       return send(res, started ? 202 : 409, started ? { started: true } : { error: 'a job is already running' });
     }
     if (req.method === 'GET' && sub === '/domains') {
-      const scored = scoreDomains(studyData(id), study.target, { scope, minAppearances: Math.max(1, Number(q.get('min') || 1)) });
+      const scored = scoreDomains(studyData(id), study.target, { profile, minAppearances: Math.max(1, Number(q.get('min') || 1)) });
       return send(res, 200, { study, ...scored, picks: listPicks(id) });
     }
     if (req.method === 'GET' && sub === '/domain') {
       const domain = String(q.get('d') ?? '').toLowerCase();
-      return send(res, 200, { study, domain, rows: domainDetail(studyData(id), study.target, domain, { scope }) });
+      return send(res, 200, { study, domain, rows: domainDetail(studyData(id), study.target, domain, { profile }) });
     }
     if (req.method === 'GET' && sub === '/export.csv') {
-      const { domains } = scoreDomains(studyData(id), study.target, { scope });
-      const head = ['domain', 'wins', 'appearances', 'reach_pct', 'win_rate_pct', 'people', 'avg_gap', 'top3_wins', 'volume_won', 'access', 'page_types'];
+      const { domains } = scoreDomains(studyData(id), study.target, { profile });
+      const head = ['domain', 'wins', 'appearances', 'weighted_reach_pct', 'reach_pct', 'win_rate_pct', 'people', 'avg_gap', 'top3_wins', 'volume_won', 'access', 'page_types'];
       const lines = [head.join(',')].concat(
         domains.map((d) =>
-          [d.domain, d.wins, d.appearances, (d.reach * 100).toFixed(1), (d.rawWinRate * 100).toFixed(1), d.people, d.avgGap.toFixed(1), d.top3Wins, d.volumeWon, d.access ?? '', Object.entries(d.types).map(([t, n]) => `${t}:${n}`).join(' ')]
+          [d.domain, d.wins, d.appearances, (d.weightedReach * 100).toFixed(1), (d.reach * 100).toFixed(1), (d.rawWinRate * 100).toFixed(1), d.people, d.avgGap.toFixed(1), d.top3Wins, d.volumeWon, d.access ?? '', Object.entries(d.types).map(([t, n]) => `${t}:${n}`).join(' ')]
             .map(csvCell)
             .join(','),
         ),

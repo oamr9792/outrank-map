@@ -95,3 +95,17 @@ export function hostOf(url) {
 
 /** Google Ads location codes for the countries this tool is likely to see. */
 export const LOCATION_CODES = { us: 2840, gb: 2826, ca: 2124, au: 2036, ie: 2372, il: 2376, de: 2276, fr: 2250 };
+
+/**
+ * Google Ads monthly search volume for one keyword. Billed per task (one
+ * task can hold up to 1,000 keywords, so a single name costs the same as a
+ * batch). Returns null volume when Google reports none.
+ */
+export async function searchVolume(keyword, { locationCode = 2840, languageCode = 'en' } = {}) {
+  const { task, cost } = await post('/keywords_data/google_ads/search_volume/live', { keywords: [keyword], location_code: locationCode, language_code: languageCode });
+  const item = task.result?.find((r) => r?.keyword?.toLowerCase() === keyword.toLowerCase()) ?? task.result?.[0];
+  return { cost, volume: item?.search_volume ?? null };
+}
+// DataForSEO's list price for one live task, approximate; shown before the
+// call, and the real charge is logged after it.
+export const USD_PER_VOLUME_TASK = 0.075;

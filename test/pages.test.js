@@ -83,7 +83,7 @@ test('Ahrefs batch-analysis: 100 URLs per request, results mapped by index', asy
     globalThis.fetch = real;
   }
   assert.equal(pageUnitsFor(0), 0);
-  assert.equal(pageUnitsFor(75), 525); // measured
+  assert.equal(pageUnitsFor(75), 600); // measured
   assert.equal(pageUnitsFor(2), 50); // measured: the per-request minimum
-  assert.equal(pageUnitsFor(150), 700 + 350);
+  assert.equal(pageUnitsFor(150), 800 + 400);
 });

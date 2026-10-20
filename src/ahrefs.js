@@ -74,11 +74,12 @@ export async function personKeywords(target, { country = 'us', limit = 500, minW
   }));
 }
 
-// batch-analysis: up to 100 URLs per request. Measured October 2026: 7 units
-// per URL (75 URLs cost 525), and a request costs at least 50 units (2 URLs
-// cost 50). Runs log the measured cost.
+// batch-analysis: up to 100 URLs per request. Measured October 2026: 8 units
+// per URL with index, url, url_rating and refdomains selected (75 URLs cost
+// 600; 7 each without index), and at least 50 units a request (2 URLs cost
+// 50). Runs log the measured cost.
 export const BATCH_SIZE = 100;
-export const UNITS_PER_PAGE = 7;
+export const UNITS_PER_PAGE = 8;
 export const MIN_UNITS_PER_REQUEST = 50;
 export function pageUnitsFor(n) {
   let units = 0;

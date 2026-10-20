@@ -126,7 +126,8 @@ function sentence(e) {
   bits.push(`in the URL ${pctText(e.nameInSlugShare)}`);
   let s = `${bits.join(', ')}.`;
   s = s[0].toUpperCase() + s.slice(1);
-  if (e.medianRefdomains != null && e.targetMedianRefdomains != null) s += ` Its winning pages have a median of ${e.medianRefdomains} referring domains; the target pages they beat have ${e.targetMedianRefdomains}.`;
+  const rd = (n) => `${n} referring domain${n === 1 ? '' : 's'}`;
+  if (e.medianRefdomains != null && e.targetMedianRefdomains != null) s += ` Its winning pages have a median of ${rd(e.medianRefdomains)}; the target pages they beat have ${e.targetMedianRefdomains}.`;
   const gaps = [];
   if (e.linksKnown < e.wins) gaps.push(`links known for ${e.linksKnown} of ${e.wins} wins`);
   if (e.agesKnown < e.wins) gaps.push(`age known for ${e.agesKnown}`);

@@ -53,6 +53,17 @@ test('the plan: name SERP with problems marked, then strengthen vs new placement
   // Explain sentences exist per host (name-only until links are fetched).
   assert.match(b.why['neg.com'], /name in the title/i);
 
+  // Everything useful is starred, so nothing is suggested (c.com never wins).
+  assert.deepEqual([r.suggestions.strengthen, r.suggestions.newPlacements], [[], []]);
+  // Unstar both: a.com comes back as a site to strengthen, b.com as a new placement.
+  db.removeClientPick(cid, 'a.com');
+  db.removeClientPick(cid, 'b.com');
+  const s = clientReport(cid, db.loadStudyData).suggestions;
+  assert.deepEqual(s.strengthen.map((x) => [x.domain, x.inNameSerp]), [['a.com', 1]]);
+  assert.deepEqual(s.newPlacements.map((x) => x.domain), ['b.com']);
+  db.saveClientPick(cid, 'a.com', '');
+  db.saveClientPick(cid, 'b.com', 'pitch a profile');
+
   const e = estimateClientExplain(cid, db.loadStudyData);
   assert.equal(e.domains, 3);
   assert.equal(e.hosts, 1);

@@ -690,20 +690,22 @@ function renderClient() {
     state.view = 'clientReport';
     loadClientReport();
   };
-  $('#cExplain').onclick = async () => {
-    const { estimate: e } = await api(`/api/clients/${state.clientId}/explain`);
-    if (!e.domains) return alert('Star at least one domain in the table first.');
-    const paid = e.ahrefsPages || e.htmlPages;
-    if (!confirm(`${e.domains} shortlisted domain${e.domains === 1 ? '' : 's'} against ${e.hosts} host${e.hosts === 1 ? '' : 's'}: ${e.pages} pages, ${e.cached} already cached.
+  $('#cExplain').onclick = () => explainClientShortlist();
+}
+
+async function explainClientShortlist() {
+  const { estimate: e } = await api(`/api/clients/${state.clientId}/explain`);
+  if (!e.domains) return alert('Star at least one domain in the table first.');
+  const paid = e.ahrefsPages || e.htmlPages;
+  if (!confirm(`${e.domains} shortlisted domain${e.domains === 1 ? '' : 's'} against ${e.hosts} host${e.hosts === 1 ? '' : 's'}: ${e.pages} pages, ${e.cached} already cached.
 
 ` + (paid ? `Ahrefs: ${e.ahrefsPages} pages, about ${num(e.ahrefsUnits)} units.
 DataForSEO: ${e.htmlPages} pages, about $${e.dataforseoUsd}.
 
 Run it?` : 'Everything is cached: no cost. Run it?'))) return;
-    await api(`/api/clients/${state.clientId}/explain`, { method: 'POST' }).catch((err) => alert(err.message));
-    refreshStatus();
-    if (!polling) polling = setInterval(tick, 3000);
-  };
+  await api(`/api/clients/${state.clientId}/explain`, { method: 'POST' }).catch((err) => alert(err.message));
+  refreshStatus();
+  if (!polling) polling = setInterval(tick, 3000);
 }
 
 function runForm() {
@@ -1103,20 +1105,39 @@ async function loadClientReport() {
       </tbody></table>
       ${r.offSerp.length ? `<p class="muted">Also flagged, outside the top ${r.serp.length}: ${r.offSerp.map((t) => esc(t.url)).join(', ')}</p>` : ''}
 
-      <h3 class="sec">2. Will the problem fade on its own?</h3>
+      <h3 class="sec">2. Will the problem fade on its own?${helpIcon('decay')}</h3>
+      ${r.hosts.some((h) => h.studyId && !h.decay) ? `<p class="noprint"><button class="ghost" id="rDecay">Fetch 12-month history for every host still missing it</button></p>` : ''}
       ${r.hosts.map((h) => `<div class="decayblock"><b>${esc(h.domain)}</b>: ${h.decay ? `${esc(decayLine(h.decay))}${decayChart(h.decay.series)}` : `<span class="muted">${h.studyId ? `not measured; fetch the 12-month history on study #${h.studyId}.` : 'not studied yet.'}</span>`}</div>`).join('')}
 
       <h3 class="sec">3. Strengthen what is already there</h3>
       ${r.strengthen.length ? r.strengthen.map((s) => planDomainBlock(s, r.hosts)).join('') : '<p class="muted">No shortlisted domain is in the name results yet.</p>'}
+      ${suggestionBlock(r.suggestions.strengthen, 'strengthen', r.hosts)}
 
       <h3 class="sec">4. New placements</h3>
-      ${r.newPlacements.length ? r.newPlacements.map((s) => planDomainBlock(s, r.hosts)).join('') : '<p class="muted">No other shortlisted domains. Star domains in the client table to add them.</p>'}
+      ${r.newPlacements.length ? r.newPlacements.map((s) => planDomainBlock(s, r.hosts)).join('') : '<p class="muted">No other shortlisted domains yet.</p>'}
+      ${suggestionBlock(r.suggestions.newPlacements, 'new', r.hosts)}
+      ${r.strengthen.length + r.newPlacements.length ? `<p class="noprint"><button class="ghost" id="rExplain">Explain the shortlist (links, page age)</button></p>` : ''}
     </article>`;
   $('#cBack').onclick = () => {
     state.view = 'table';
     loadClient();
   };
   $('#cPrint').onclick = () => window.print();
+  $('.report.plan').onclick = async (e) => {
+    const star = e.target.closest('[data-rstar]');
+    if (!star) return;
+    await api(`/api/clients/${state.clientId}/picks`, { method: 'PUT', body: JSON.stringify({ domain: star.dataset.rstar, note: '' }) }).catch((err) => alert(err.message));
+    loadClientReport();
+  };
+  $('#rDecay')?.addEventListener('click', async () => {
+    const e = await api(`/api/clients/${state.clientId}/decay`);
+    if (!e.hosts.length) return loadClientReport();
+    if (!confirm(`Pull 12 months of Google history for ${e.hosts.map((h) => `${h.host} (${h.keywords} searches)`).join(', ')}? DataForSEO, about $${e.dataforseoUsd} in all at the listed price; the real charge is logged.`)) return;
+    await api(`/api/clients/${state.clientId}/decay`, { method: 'POST' }).catch((err) => alert(err.message));
+    refreshStatus();
+    if (!polling) polling = setInterval(tick, 3000);
+  });
+  $('#rExplain')?.addEventListener('click', () => explainClientShortlist());
 }
 
 installHelp();
@@ -1180,3 +1201,19 @@ document.addEventListener('click', (e) => {
     openGuide();
   }
 });
+
+/** Starrable suggestions under a report section (not printed). */
+function suggestionBlock(list, kind, hosts) {
+  if (!list.length) return '';
+  const multi = hosts.filter((h) => h.studyId).length > 1;
+  return `<div class="suggest noprint">
+    <p class="muted"><b>Suggestions</b> — ${kind === 'strengthen' ? 'sites already on the name’s page one, top first' : `the strongest candidates not yet on the name’s results, by merged reach${multi ? ' then average reach across hosts' : ''}`}. Star the ones to use; they move into the plan.</p>
+    <table class="compact"><tbody>${list.map((s) => `<tr>
+      <td><button class="star" data-rstar="${esc(s.domain)}" title="Add to the plan">☆</button></td>
+      <td>${esc(s.domain)} ${s.access ? `<span class="tag">${esc(s.access)}</span>` : ''}</td>
+      <td class="num">${s.inNameSerp ? `now #${s.inNameSerp}` : ''}</td>
+      <td class="num" title="Merged reach (against the hardest host)">${pct(s.merged)}</td>
+      ${multi ? `<td class="num muted" title="Average reach across hosts">avg ${pct(s.avgReach)}</td>` : ''}
+      <td class="muted">${Object.entries(s.types).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([t]) => esc(t)).join(', ')}</td></tr>`).join('')}</tbody></table>
+  </div>`;
+}

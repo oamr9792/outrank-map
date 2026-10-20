@@ -12,7 +12,7 @@ Your client Googles their name and a bad article shows up. To push it down, you 
 2. **Tick the bad results** in the list, then press *Save problem URLs*.
 3. Press **Run studies**. For each bad website, the tool studies who beats it. If that site was studied before, it reuses the study for free.
 4. Look at **3 · Domains that beat every host**. The top rows are your best bets. Click a row to see the actual winning pages.
-5. **Star (☆)** the ones you'll use and add a note. Press **Plan report** and print it, or save it as a PDF.
+5. Press **Plan report**. It lists suggestions under sections 3 and 4: press ☆ on the ones you'll use and they move into the plan. Press the history button in section 2 to see whether each bad result is fading. Then print it, or save it as a PDF.
 
 Every ⓘ in the app explains a number in plain words, and what to use it for.
 
@@ -54,7 +54,7 @@ Anything that costs money asks you first and shows the estimate.
 - **Median page age**: how long winners took, so you know how long to wait.
 - **Name in title / URL**: put the full name in both.
 
-**Plan report.** One printable page or two, in order: what Google shows, whether each bad result is fading on its own, sites you already have to strengthen, then new placements to go after.
+**Plan report.** One printable page or two, in order: what Google shows, whether each bad result is fading on its own, sites you already have to strengthen, then new placements to go after. You can fill it in from the report itself: *Fetch 12-month history for every host* in section 2, ☆ on the suggestions in sections 3 and 4, and *Explain the shortlist* at the end. Suggestions and buttons don't print.
 
 ### B. Study one website (no client yet)
 

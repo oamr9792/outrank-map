@@ -143,3 +143,6 @@ table.compact tr.problem td { background: var(--neg-soft); }
 .report.guide li { margin: 3px 0; }
 .report.guide code { background: var(--bg); padding: 1px 4px; border-radius: 4px; }
 header #openGuide { margin-left: 6px; }
+
+.suggest { margin: 8px 0 4px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; }
+.suggest table.compact td { font-size: 13px; }

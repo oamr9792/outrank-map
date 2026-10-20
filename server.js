@@ -275,6 +275,17 @@ async function api(req, res, url) {
       }
     }
     if (req.method === 'GET' && sub === '/report') return send(res, 200, plan.clientReport(id, studyData));
+    if (sub === '/decay') {
+      if (req.method === 'GET') return send(res, 200, plan.estimateClientDecay(id, studyData));
+      if (req.method === 'POST') {
+        const started = startJob('decay', async (log) => {
+          job.clientId = id;
+          await plan.runClientDecay(id, studyData, log);
+          log('Done.');
+        });
+        return started ? send(res, 202, { started: true }) : busy();
+      }
+    }
     if (sub === '/placements') {
       if (req.method === 'POST') {
         const body = await readJson(req);

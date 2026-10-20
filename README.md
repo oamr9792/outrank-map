@@ -61,6 +61,17 @@ winning pages, printable to PDF. All of it is stored in the database.
 **Hosting.** See [DEPLOY.md](DEPLOY.md) (Render, password-protected). Locally
 on 127.0.0.1 with no `APP_PASSWORD` the login is skipped.
 
+**Why winning pages win.** *Explain shortlist* looks up, for each starred
+domain's winning pages and the target pages they beat: URL rating and
+referring domains (Ahrefs `batch-analysis`, 100 URLs a request) and the
+publish date (from the URL when it carries one, otherwise the page's own
+JSON-LD / meta / `<time>` tags read through DataForSEO, ~$0.00015 a page).
+The confirm dialog shows the cost first; results are cached by URL in
+`page_metrics`, so nothing is paid for twice. The domain's drill-down and the
+report then say, e.g., "Wins 71% of the time with pages that have no external
+links, median page age 14 months, name in the title 92% of the time", with
+how many wins each figure rests on. Name-in-title / URL needs no lookup.
+
 **Negative categories.** The headline word list in `src/classify.js` is
 grouped into legal-criminal, civil-litigation, financial-distress,
 regulatory, conduct and reputation-opinion; `negativeTitle()` returns the

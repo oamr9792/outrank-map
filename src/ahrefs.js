@@ -73,3 +73,34 @@ export async function personKeywords(target, { country = 'us', limit = 500, minW
     url: k.best_position_url,
   }));
 }
+
+// batch-analysis: up to 100 URLs per request. Ahrefs charges per row and
+// per request (a request costs at least 50 units). This per-URL figure is an
+// estimate until a run measures it; runs log the measured cost.
+export const BATCH_SIZE = 100;
+export const UNITS_PER_PAGE = 5;
+export const MIN_UNITS_PER_REQUEST = 50;
+export const pageUnitsFor = (n) => (n ? Math.ceil(n / BATCH_SIZE) * MIN_UNITS_PER_REQUEST + n * UNITS_PER_PAGE : 0);
+
+/** URL rating and referring domains per exact URL, as a Map keyed by URL. */
+export async function pageMetrics(urls) {
+  if (!hasKey()) throw new Error('AHREFS_API_KEY is not set in .env');
+  const out = new Map();
+  for (let i = 0; i < urls.length; i += BATCH_SIZE) {
+    const chunk = urls.slice(i, i + BATCH_SIZE);
+    const res = await fetch(`${BASE}/batch-analysis/batch-analysis`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${process.env.AHREFS_API_KEY}`, Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ select: ['url', 'url_rating', 'refdomains'], targets: chunk.map((url) => ({ url, mode: 'exact', protocol: 'both' })) }),
+      signal: AbortSignal.timeout(180000),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(`Ahrefs batch-analysis: HTTP ${res.status} ${body?.error ?? ''}`.trim());
+    for (const t of body?.targets ?? []) {
+      // `index` is the position in the request; fall back to the URL echo.
+      const url = chunk[t.index] ?? t.url;
+      if (url) out.set(url, { urlRating: t.url_rating ?? null, refdomains: t.refdomains ?? null });
+    }
+  }
+  return out;
+}

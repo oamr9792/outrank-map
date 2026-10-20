@@ -190,6 +190,7 @@ export function domainDetail(keywords, target, domain, { profile = {} } = {}) {
       people: k.people,
       volume: k.volume,
       outcome: r.position < k.target.position ? 'win' : 'loss',
+      serpAt: k.serpAt ?? null,
       weight: k.weight,
       parts: k.parts,
       target: k.target,

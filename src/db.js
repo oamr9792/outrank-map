@@ -49,6 +49,19 @@ CREATE TABLE IF NOT EXISTS picks (
   PRIMARY KEY (study_id, domain)
 );
 
+-- Page-level facts, keyed by URL so no study pays for the same page twice.
+CREATE TABLE IF NOT EXISTS page_metrics (
+  url TEXT PRIMARY KEY,
+  url_rating REAL,
+  refdomains INTEGER,
+  ahrefs_at TEXT,                -- null until Ahrefs has been asked
+  published_at TEXT,             -- ISO date, when the page states one
+  date_source TEXT,              -- url | jsonld | meta | time | none
+  date_at TEXT,                  -- null until a date was looked for
+  date_error TEXT,
+  dfs_cost REAL NOT NULL DEFAULT 0
+);
+
 -- A client: a person whose own name SERP carries the negative results.
 CREATE TABLE IF NOT EXISTS clients (
   id INTEGER PRIMARY KEY,
@@ -182,6 +195,7 @@ export function loadStudyData(studyId) {
     people: JSON.parse(k.people),
     orgs: JSON.parse(k.orgs),
     volume: k.volume,
+    serpAt: k.serp_at,
     results: byKw.get(k.id) ?? [],
   }));
 }
@@ -260,4 +274,31 @@ export function setClientVolume(id, { volume, band, cost = 0 }) {
   const d = openDb();
   if (volume !== undefined) d.prepare('UPDATE clients SET volume = ? WHERE id = ?').run(volume, id);
   d.prepare('UPDATE clients SET volume_band = ?, serp_cost = serp_cost + ? WHERE id = ?').run(band ?? null, cost, id);
+}
+
+// --- page metrics ----------------------------------------------------------------
+
+export function getPageMetrics(urls) {
+  const d = openDb();
+  const get = d.prepare('SELECT * FROM page_metrics WHERE url = ?');
+  return new Map(urls.map((u) => [u, get.get(u)]).filter(([, r]) => r));
+}
+
+export function savePageAhrefs(url, { urlRating, refdomains }) {
+  openDb()
+    .prepare(
+      `INSERT INTO page_metrics (url, url_rating, refdomains, ahrefs_at) VALUES (?, ?, ?, ?)
+       ON CONFLICT (url) DO UPDATE SET url_rating = excluded.url_rating, refdomains = excluded.refdomains, ahrefs_at = excluded.ahrefs_at`,
+    )
+    .run(url, urlRating ?? null, refdomains ?? null, new Date().toISOString());
+}
+
+export function savePageDate(url, { publishedAt, source, error, cost = 0 }) {
+  openDb()
+    .prepare(
+      `INSERT INTO page_metrics (url, published_at, date_source, date_at, date_error, dfs_cost) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (url) DO UPDATE SET published_at = excluded.published_at, date_source = excluded.date_source,
+         date_at = excluded.date_at, date_error = excluded.date_error, dfs_cost = page_metrics.dfs_cost + excluded.dfs_cost`,
+    )
+    .run(url, publishedAt ?? null, source ?? 'none', new Date().toISOString(), error ?? null, cost);
 }

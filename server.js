@@ -15,6 +15,7 @@ installTrustStore((process.env.EXTRA_CA_CERTS || '').split(';').filter(Boolean))
 
 const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick, createClient, getClient, listClients, deleteClient, listTargets, setTargets, setClientVolume } = await import('./src/db.js');
 const clients = await import('./src/client.js');
+const pages = await import('./src/pages.js');
 const auth = await import('./src/auth.js');
 const { createStudy, fetchSerps, estimate, DEFAULTS } = await import('./src/run.js');
 const { scoreDomains, domainDetail, cleanProfile, PRESETS, VOLUME_BANDS } = await import('./src/score.js');
@@ -294,12 +295,26 @@ async function api(req, res, url) {
       const data = studyData(id);
       const { summary, domains } = scoreDomains(data, study.target, { profile });
       const byDomain = new Map(domains.map((d) => [d.domain, d]));
+      const explained = pages.explanations(id);
       const picks = listPicks(id).map((p) => ({
         ...p,
+        explanation: explained[p.domain] ?? null,
         stats: byDomain.get(p.domain) ?? null,
         wins: domainDetail(data, study.target, p.domain, { profile }).filter((r) => r.outcome === 'win').slice(0, 8),
       }));
       return send(res, 200, { study, scope, profile, summary, picks });
+    }
+    if (sub === '/explain') {
+      // GET: what is known (free) and what a run would cost. POST: the run.
+      if (req.method === 'GET') return send(res, 200, { estimate: pages.estimateExplain(id), explanations: pages.explanations(id) });
+      if (req.method === 'POST') {
+        const started = startJob('explain', async (log) => {
+          job.studyId = id;
+          await pages.runExplain(id, log);
+          log('Done.');
+        });
+        return send(res, started ? 202 : 409, started ? { started: true } : { error: 'a job is already running' });
+      }
     }
     if (route.startsWith('POST') && sub === '/resume') {
       const started = startJob('resume', async (log) => {

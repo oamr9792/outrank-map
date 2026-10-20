@@ -109,3 +109,19 @@ export async function searchVolume(keyword, { locationCode = 2840, languageCode 
 // DataForSEO's list price for one live task, approximate; shown before the
 // call, and the real charge is logged after it.
 export const USD_PER_VOLUME_TASK = 0.075;
+
+/**
+ * A page's HTML through DataForSEO's crawler: an instant-pages crawl that
+ * stores the HTML, then a read of it. About $0.00015 a page.
+ */
+export const USD_PER_HTML_PAGE = 0.00015;
+export async function rawHtml(url) {
+  const crawl = await post('/on_page/instant_pages', { url, store_raw_html: true, enable_javascript: false });
+  const page = crawl.task.result?.[0]?.items?.[0];
+  if (!page) throw new Error(`DataForSEO could not crawl ${url}`);
+  if (page.status_code && page.status_code >= 400) throw new Error(`HTTP ${page.status_code}`);
+  const read = await post('/on_page/raw_html', { id: crawl.task.id, url });
+  const html = read.task.result?.[0]?.items?.html;
+  if (!html) throw new Error('no HTML stored');
+  return { html, cost: crawl.cost + read.cost };
+}

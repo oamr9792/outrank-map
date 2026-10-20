@@ -254,6 +254,7 @@ function renderStudy() {
       <label style="flex:0;flex-direction:row;align-items:center;gap:6px;margin:0">Seen with target ≥ <input id="min" type="number" min="1" value="${state.min}" style="width:60px"></label>
       <input id="filter" placeholder="Filter domains" value="${esc(state.filter)}">
       <button id="openReport">Report (${state.picks.size} shortlisted)</button>
+      <button class="ghost" id="explain" title="Look up links and page age for the shortlisted domains' winning pages">Explain shortlist</button>
       <a class="btn ghost" href="/api/studies/${study.id}/export.csv?${profileQuery()}">CSV</a>
       <button class="ghost" id="resume" title="Fetch any missing or failed SERPs">Resume / retry</button>
     </div>
@@ -291,6 +292,22 @@ function renderStudy() {
   $('#openReport').addEventListener('click', () => {
     state.view = 'report';
     loadReport();
+  });
+  $('#explain').addEventListener('click', async () => {
+    const { estimate: e } = await api(`/api/studies/${study.id}/explain`);
+    if (!e.domains) return alert('Star at least one domain first: only shortlisted domains are explained.');
+    const paid = e.ahrefsPages || e.htmlPages;
+    const msg = `${e.domains} shortlisted domain${e.domains === 1 ? '' : 's'}, ${e.pages} pages (their winning pages and the target pages they beat); ${e.cached} already cached.
+
+`
+      + (paid ? `Ahrefs: ${e.ahrefsPages} pages, about ${num(e.ahrefsUnits)} units.
+DataForSEO: ${e.htmlPages} pages to read dates from, about $${e.dataforseoUsd}.
+
+Run it?` : 'Everything is cached: no cost. Run it?');
+    if (!confirm(msg)) return;
+    await api(`/api/studies/${study.id}/explain`, { method: 'POST' }).catch((err) => alert(err.message));
+    refreshStatus();
+    if (!polling) polling = setInterval(tick, 3000);
   });
   $('#resume').addEventListener('click', async () => {
     await api(`/api/studies/${study.id}/resume`, { method: 'POST' }).catch((err) => alert(err.message));
@@ -359,7 +376,7 @@ async function loadDomain(domain, scroll) {
     <div class="head"><h3>${esc(domain)} vs ${esc(state.data.study.target)}</h3>
       <span class="muted">${wins.length} wins of ${rows.length} shared searches${agg?.sections?.length ? ` · winning sections: ${agg.sections.map(([s, n]) => `${esc(s)} ${n}`).join(', ')}` : ''}</span>
       <button id="pickBtn" class="${picked ? 'ghost' : ''}">${picked ? '★ Shortlisted — remove' : '☆ Add to shortlist'}</button></div>
-    ${picked ? `<textarea id="pickNote" rows="2" placeholder="Why this domain, angle, contact, status… (saved automatically)">${esc(state.picks.get(domain))}</textarea>` : ''}
+    ${picked ? `<textarea id="pickNote" rows="2" placeholder="Why this domain, angle, contact, status… (saved automatically)">${esc(state.picks.get(domain))}</textarea><p class="notes" id="explainLine"></p>` : ''}
     <div class="tablewrap"><table>
       <thead><tr><th>Search</th><th class="num" title="How much this contest counts toward weighted reach">Weight</th><th class="num">Vol</th><th class="num">Them</th><th>Their page</th><th class="num">Target</th><th>Target's page</th></tr></thead>
       <tbody>${rows
@@ -374,6 +391,13 @@ async function loadDomain(domain, scroll) {
         <td><a href="${href(r.target.url)}" target="_blank" rel="noopener noreferrer">${esc(r.target.title || r.target.url)}</a> ${negTag(r.target.negative)}<span class="tag">${esc(r.target.type)}</span></td></tr>`,
         )
         .join('')}</tbody></table></div>`;
+  if (picked) {
+    api(`/api/studies/${state.studyId}/explain`).then(({ explanations }) => {
+      const e = explanations[domain];
+      if (!e || !$('#explainLine')) return;
+      $('#explainLine').textContent = e.linksKnown || e.agesKnown ? e.sentence : `${e.sentence} Press “Explain shortlist” to add links and page age.`;
+    });
+  }
   $('#pickBtn').onclick = () => togglePick(domain);
   $('#pickNote')?.addEventListener('change', (e) => savePick(domain, e.target.value));
   if (scroll) $('#detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -411,6 +435,7 @@ async function loadReport() {
           (p) => `<section class="pick">
         <h3>${esc(p.domain)} ${p.stats?.access ? `<span class="tag">${esc(p.stats.access)}</span>` : ''}</h3>
         ${p.stats ? `<p class="muted">Weighted reach <b>${pct(p.stats.weightedReach)}</b> · beats ${esc(s.target)} on <b>${p.stats.wins}</b> searches (${pct(p.stats.reach)} of all) · head-to-head ${pct(p.stats.rawWinRate)} of ${p.stats.appearances} · ${p.stats.people} distinct people · avg ${p.stats.avgGap.toFixed(1)} positions higher · winning pages: ${Object.entries(p.stats.types).map(([t, n]) => `${esc(t)} ${n}`).join(', ') || 'none'}</p>` : '<p class="muted">Not seen alongside the target in this scope.</p>'}
+        ${p.explanation ? `<p>${esc(p.explanation.sentence)}</p>` : ''}
         ${p.note ? `<p class="notes">${esc(p.note)}</p>` : ''}
         ${p.wins.length ? `<table><thead><tr><th>Search</th><th class="num">Them</th><th>Winning page</th><th class="num">Target</th></tr></thead><tbody>${p.wins
           .map((w) => `<tr><td>${esc(w.keyword)}</td><td class="num">${w.them.position}</td><td><a href="${href(w.them.url)}" target="_blank" rel="noopener noreferrer">${esc(w.them.title || w.them.url)}</a> <span class="tag">${esc(w.them.type)}</span></td><td class="num">${w.target.position}</td></tr>`)

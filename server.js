@@ -17,6 +17,7 @@ const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, 
 const clients = await import('./src/client.js');
 const pages = await import('./src/pages.js');
 const decay = await import('./src/decay.js');
+const { allStudies } = await import('./src/allstudies.js');
 const auth = await import('./src/auth.js');
 const { createStudy, fetchSerps, estimate, DEFAULTS } = await import('./src/run.js');
 const { scoreDomains, domainDetail, cleanProfile, PRESETS, VOLUME_BANDS } = await import('./src/score.js');
@@ -149,6 +150,11 @@ async function api(req, res, url) {
       log('Done.');
     });
     return send(res, started ? 202 : 409, started ? { started: true } : { error: 'a job is already running' });
+  }
+
+  if (route === 'GET /api/all') {
+    const scope = PRESETS[q.get('scope')] ? q.get('scope') : 'all';
+    return send(res, 200, { scope, ...allStudies({ scope, minAppearances: Math.max(1, Number(q.get('min') || 1)), minTargets: Math.max(1, Number(q.get('minTargets') || 1)), load: studyData }) });
   }
 
   // --- clients ------------------------------------------------------------------

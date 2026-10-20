@@ -211,6 +211,7 @@ $('#studies').addEventListener('click', async (e) => {
   state.studyId = Number(li.dataset.id);
   state.clientId = null;
   state.pMode = 'saved';
+  if (state.view === 'all') state.view = 'table';
   state.domain = null;
   state.view = 'table';
   refreshStatus();
@@ -533,6 +534,7 @@ $('#clients').addEventListener('click', async (e) => {
 });
 
 function openClient(id) {
+  if (state.view === 'all') state.view = 'table';
   state.clientId = id;
   state.studyId = null;
   state.cDomain = null;
@@ -809,4 +811,144 @@ async function loadClientDomain(domain, scroll) {
     loadStudy();
   };
   if (scroll) $('#cDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ---- all studies (item 6) -------------------------------------------------------------
+// Every domain across the newest study of every target: the house ranking of
+// placement domains by how many targets they beat, and how regularly.
+
+const ALL_COLS = [
+  ['domain', 'Domain', false],
+  ['targetsBeaten', 'Targets beaten', true],
+  ['weightedReach', 'Weighted reach', true],
+  ['wins', 'Wins', true],
+  ['contests', 'Contests', true],
+  ['reach', 'Reach', true],
+  ['rawWinRate', 'Head-to-head', true],
+  ['appearances', 'Seen with target', true],
+  ['people', 'People', true],
+  ['avgGap', 'Avg gap', true],
+  ['top3Wins', 'Top-3 wins', true],
+  ['volumeWon', 'Volume won', true],
+  ['access', 'Access', false],
+  ['types', 'Winning page types', false],
+];
+state.all = { scope: 'all', min: 2, minTargets: 1, sort: 'targetsBeaten', dir: -1, filter: '', domain: null, data: null };
+
+$('#openAll').addEventListener('click', () => {
+  state.studyId = null;
+  state.clientId = null;
+  state.view = 'all';
+  refreshStatus();
+  loadAll();
+});
+
+async function loadAll() {
+  const a = state.all;
+  const d = await api(`/api/all?scope=${a.scope}&min=${a.min}&minTargets=${a.minTargets}`).catch((err) => ({ error: err.message }));
+  if (state.view !== 'all') return;
+  if (d.error) return ($('#view').innerHTML = `<div class="empty">${esc(d.error)}</div>`);
+  a.data = d;
+  $('#view').innerHTML = `
+    <div class="head"><h3>All studies</h3>
+      <div class="muted">${d.studies.length} target${d.studies.length === 1 ? '' : 's'}: ${d.studies.map((s) => `${esc(s.target)} (${s.contests})`).join(' · ')}. The newest study per target and country counts; nothing here costs API credit.</div></div>
+    <div class="toolbar">
+      <div class="tabs" id="allScopes">${SCOPES.map(([k, l]) => `<button data-scope="${k}" class="${k === a.scope ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <label style="flex:0;flex-direction:row;align-items:center;gap:6px;margin:0">Seen with targets ≥ <input id="allMin" type="number" min="1" value="${a.min}" style="width:60px"></label>
+      <label style="flex:0;flex-direction:row;align-items:center;gap:6px;margin:0">Targets met ≥ <input id="allMinT" type="number" min="1" value="${a.minTargets}" style="width:60px"></label>
+      <input id="allFilter" placeholder="Filter domains" value="${esc(a.filter)}">
+    </div>
+    <div class="tablewrap"><table id="allTable"><thead></thead><tbody></tbody></table></div>
+    <p class="muted">Targets beaten = targets it won at least one contest against, of the targets it met. Contests = the contests of the studies it appeared in; reach = wins ÷ those. A preset applies to every study.</p>
+    <div id="allDetail" class="detail"></div>`;
+  $('#allScopes').onclick = (e) => {
+    const b = e.target.closest('[data-scope]');
+    if (!b) return;
+    a.scope = b.dataset.scope;
+    loadAll();
+  };
+  $('#allMin').onchange = (e) => {
+    a.min = Math.max(1, Number(e.target.value) || 1);
+    loadAll();
+  };
+  $('#allMinT').onchange = (e) => {
+    a.minTargets = Math.max(1, Number(e.target.value) || 1);
+    loadAll();
+  };
+  $('#allFilter').oninput = (e) => {
+    a.filter = e.target.value;
+    renderAllTable();
+  };
+  renderAllTable();
+  if (a.domain) renderAllDetail(a.domain);
+}
+
+function renderAllTable() {
+  const a = state.all;
+  const f = a.filter.trim().toLowerCase();
+  const rows = a.data.domains
+    .filter((d) => !f || d.domain.includes(f))
+    .sort((x, y) => {
+      const [p, q] = [x[a.sort], y[a.sort]];
+      return (typeof p === 'string' || p == null ? String(p ?? '').localeCompare(String(q ?? '')) : p - q) * a.dir;
+    })
+    .slice(0, 300);
+  $('#allTable thead').innerHTML = `<tr>${ALL_COLS.map(([k, l, n]) => `<th data-k="${k}" class="${n ? 'num' : ''}">${l}${a.sort === k ? (a.dir < 0 ? ' ↓' : ' ↑') : ''}</th>`).join('')}</tr>`;
+  $('#allTable tbody').innerHTML = rows.length
+    ? rows
+        .map(
+          (d) => `<tr data-ad="${esc(d.domain)}" class="${d.domain === a.domain ? 'on' : ''}">
+      <td>${esc(d.domain)}${d.isTarget ? ' <span class="tag neg" title="Also studied as a target">target</span>' : ''}</td>
+      <td class="num"><b>${d.targetsBeaten}</b> of ${d.targetsMet}</td>
+      <td class="num">${pct(d.weightedReach)}</td>
+      <td class="num">${d.wins}</td>
+      <td class="num">${d.contests}</td>
+      <td class="num">${pct(d.reach)}</td>
+      <td class="num">${pct(d.rawWinRate)}</td>
+      <td class="num">${d.appearances}</td>
+      <td class="num">${d.people}</td>
+      <td class="num">${d.wins ? d.avgGap.toFixed(1) : '–'}</td>
+      <td class="num">${d.top3Wins}</td>
+      <td class="num">${num(d.volumeWon)}</td>
+      <td>${d.access ? `<span class="tag">${esc(d.access)}</span>` : ''}</td>
+      <td>${Object.entries(d.types).sort((x, y) => y[1] - x[1]).slice(0, 3).map(([t, n]) => `<span class="tag">${esc(t)} ${n}</span>`).join('')}</td></tr>`,
+        )
+        .join('')
+    : `<tr><td colspan="${ALL_COLS.length}" class="muted">${a.data.studies.length ? 'No domains match.' : 'No finished studies yet.'}</td></tr>`;
+  $('#allTable thead').onclick = (e) => {
+    const th = e.target.closest('th');
+    if (!th) return;
+    if (a.sort === th.dataset.k) a.dir *= -1;
+    else [a.sort, a.dir] = [th.dataset.k, th.classList.contains('num') ? -1 : 1];
+    renderAllTable();
+  };
+  $('#allTable tbody').onclick = (e) => {
+    const tr = e.target.closest('tr[data-ad]');
+    if (!tr) return;
+    a.domain = tr.dataset.ad;
+    document.querySelectorAll('#allTable tbody tr').forEach((x) => x.classList.toggle('on', x.dataset.ad === a.domain));
+    renderAllDetail(a.domain, true);
+  };
+}
+
+function renderAllDetail(domain, scroll) {
+  const d = state.all.data.domains.find((x) => x.domain === domain);
+  if (!d) return ($('#allDetail').innerHTML = '');
+  $('#allDetail').innerHTML = `
+    <div class="head"><h3>${esc(domain)} against each target</h3><span class="muted">Open a study to see the winning pages.</span></div>
+    <div class="tablewrap"><table><thead><tr><th>Target</th><th class="num">Wins</th><th class="num">Contests</th><th class="num">Reach</th><th></th></tr></thead><tbody>
+    ${d.targets.map((t) => `<tr><td>${esc(t.target)} <span class="muted">${esc(t.country.toUpperCase())}</span></td><td class="num">${t.wins}</td><td class="num">${t.contests}</td><td class="num">${pct(t.reach)}</td><td><a href="#" data-open-study="${t.studyId}" data-open-domain="${esc(domain)}">open study #${t.studyId}</a></td></tr>`).join('')}
+    </tbody></table></div>`;
+  $('#allDetail').onclick = (e) => {
+    const link = e.target.closest('[data-open-study]');
+    if (!link) return;
+    e.preventDefault();
+    state.view = 'table';
+    state.studyId = Number(link.dataset.openStudy);
+    state.domain = link.dataset.openDomain;
+    state.pMode = 'saved';
+    refreshStatus();
+    loadStudy();
+  };
+  if (scroll) $('#allDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }

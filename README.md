@@ -74,6 +74,15 @@ missing counts as just below the last result, so dropping out shows as
 decay. Stored per study, recomputed from the stored history for free, and
 shown in the report.
 
+**All studies.** One table of every domain across the newest study of each
+target and country (older repeats are left out so searches are not counted
+twice): targets beaten (of targets met), weighted reach under a preset,
+wins, contests (of the studies it appeared in), reach and the leaderboard's
+other columns, with a per-target breakdown that links back to each study.
+It reads stored SERPs only, scoring each study as its own page does, so the
+numbers reconcile. Over time it becomes the house ranking of placement
+domains by their power to beat the targets studied.
+
 **Why winning pages win.** *Explain shortlist* looks up, for each starred
 domain's winning pages and the target pages they beat: URL rating and
 referring domains (Ahrefs `batch-analysis`, 100 URLs a request) and the

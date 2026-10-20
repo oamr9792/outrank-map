@@ -13,18 +13,38 @@ test('monthly median, missing counted just below the last result', () => {
   ]);
   const d = summarizeDecay(history);
   assert.deepEqual(d.series.map((s) => [s.month, s.median, s.keywords, s.missing]), [['2026-04', 4, 3, 0], ['2026-10', 9, 3, 1]]);
-  assert.equal(d.latest, '2026-10');
-  assert.equal(d.baseMonth, '2026-04');
-  // deltas: +6, +46, 0 -> median +6 (moving down)
+  // Each keyword against its own snapshot ~6 months earlier: +6, +46, 0.
   assert.equal(d.change6, 6);
   assert.equal(d.change6Keywords, 3);
+  assert.ok(Math.abs(d.spanMonths - 5.8) < 0.3);
 });
 
-test('six-month change needs both months; empty history is null', () => {
+test('irregular snapshots: each keyword is compared with its own ~6-month-old snapshot', () => {
+  const history = new Map([
+    // latest Sept; 4, 6 and 8 months back available: the 6-month one is used
+    ['a', [snap('2026-01-05', 30), snap('2026-03-05', 20), snap('2026-05-05', 25), snap('2026-09-05', 10)]],
+    // latest Aug; nearest earlier snapshot is 7 months back: used
+    ['b', [snap('2026-01-20', 8), snap('2026-08-20', 12)]],
+    // only 2 months of history: no comparison
+    ['c', [snap('2026-07-01', 5), snap('2026-09-01', 5)]],
+  ]);
+  const d = summarizeDecay(history);
+  assert.equal(d.change6Keywords, 2);
+  assert.equal(d.change6, (10 - 20 + (12 - 8)) / 2); // median of -10 and +4
+});
+
+test('months with too few keywords are marked thin', () => {
+  const kws = Array.from({ length: 28 }, (_, i) => [`k${i}`, [snap('2026-03-01', 10 + i), ...(i < 4 ? [snap('2026-09-01', 2)] : [])]]);
+  const d = summarizeDecay(new Map(kws));
+  assert.equal(d.minKeywordsPerMonth, 7); // max(5, 25% of 28)
+  assert.deepEqual(d.series.map((s) => [s.month, s.keywords, s.thin]), [['2026-03', 28, false], ['2026-09', 4, true]]);
+});
+
+test('no comparison possible gives a null change; empty history is empty', () => {
   const d = summarizeDecay(new Map([['a', [snap('2026-08-01', 3), snap('2026-10-01', 2)]]]));
   assert.equal(d.change6, null);
   assert.equal(d.change6Keywords, 0);
-  assert.equal(summarizeDecay(new Map()).latest, null);
+  assert.deepEqual(summarizeDecay(new Map()).series, []);
 });
 
 test('target position counts subdomains and takes the best', () => {

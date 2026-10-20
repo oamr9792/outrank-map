@@ -90,7 +90,7 @@ const negTag = (neg, suffix = '') => (neg ? `<span class="tag neg" title="matche
 
 /** The target's median position by month, as a small inline SVG (1 at the top). */
 function decayChart(series) {
-  const pts = series.filter((s) => s.median != null);
+  const pts = series.filter((s) => s.median != null && !s.thin);
   if (pts.length < 2) return '<p class="muted">Not enough months to draw a line.</p>';
   const W = 600, H = 170, L = 34, R = 10, T = 12, B = 26;
   const max = Math.max(...pts.map((p) => p.median)), min = Math.min(...pts.map((p) => p.median));
@@ -102,16 +102,17 @@ function decayChart(series) {
     ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" class="grid"/><text x="${L - 6}" y="${y(t) + 4}" text-anchor="end">#${t}</text>`).join('')}
     <polyline points="${pts.map((p, i) => `${x(i)},${y(p.median)}`).join(' ')}" class="line"/>
     ${pts.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.median)}" r="3" class="dot"><title>${p.month}: median #${p.median} over ${p.keywords} searches${p.missing ? `, ${p.missing} not in the results` : ''}</title></circle>`).join('')}
-    ${pts.map((p, i) => (i % Math.ceil(pts.length / 6) === 0 || i === pts.length - 1 ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${p.month}</text>` : '')).join('')}
+    ${pts.map((p, i) => (i % Math.ceil(pts.length / 6) === 0 || i === pts.length - 1 ? `<text x="${x(i)}" y="${H - 6}" text-anchor="${i === pts.length - 1 ? 'end' : i === 0 ? 'start' : 'middle'}">${p.month}</text>` : '')).join('')}
   </svg>`;
 }
 
 /** The one-number summary of decay, in words. */
 function decayLine(d) {
-  if (!d || d.change6 == null) return d ? 'Not enough history to compare six months.' : '';
+  if (!d || d.change6 == null) return d ? 'Not enough history: no search has snapshots about six months apart.' : '';
   const n = Math.abs(d.change6);
   const dir = d.change6 > 0 ? `down ${n.toFixed(1)} positions (fading)` : d.change6 < 0 ? `up ${n.toFixed(1)} positions (strengthening)` : 'no change';
-  return `Median change since ${d.baseMonth}: ${dir}, over ${d.change6Keywords} searches.`;
+  const few = d.change6Keywords < 10 ? ' Few searches: treat as indicative.' : '';
+  return `Over about ${Math.round(d.spanMonths)} months, the target's median change is ${dir}, across ${d.change6Keywords} of ${d.keywords} searches.${few}`;
 }
 
 /** Why a contest weighs what it does, for the drill-down's tooltip. */
@@ -436,7 +437,7 @@ async function renderDecay(study) {
   const { decay: d, estimate: e } = await api(`/api/studies/${study.id}/decay?${profileQuery()}`);
   if (!$('#decayCard')) return;
   $('#decayCard').innerHTML = `<h2>Does the target fade on its own?</h2>
-    ${d ? `<p><b>${esc(decayLine(d))}</b></p>${decayChart(d.series)}<p class="muted">The target's median position on ${d.keywords} of these searches, by month (DataForSEO historical snapshots, ${new Date(d.fetchedAt).toLocaleDateString()}, $${d.cost.toFixed(3)}). A month where it was missing counts as just below the last result.</p>` : '<p class="muted">Follows the target on its highest-volume searches in scope over the last 12 months.</p>'}
+    ${d ? `<p><b>${esc(decayLine(d))}</b></p>${decayChart(d.series)}<p class="muted">The target's median position on ${d.keywords} of these searches, by month (DataForSEO historical snapshots, ${new Date(d.fetchedAt).toLocaleDateString()}, $${d.cost.toFixed(3)}). A month where it was missing counts as just below the last result. Months with fewer than ${d.minKeywordsPerMonth} searches are left off the line${d.series.some((s) => s.thin) ? ` (${d.series.filter((s) => s.thin).map((s) => s.month).join(', ')})` : ''}, since a different mix of searches is not a trend.</p>` : '<p class="muted">Follows the target on its highest-volume searches in scope over the last 12 months.</p>'}
     <button class="ghost" id="decayRun">${d ? 'Re-fetch' : 'Fetch'} 12-month history (${e.keywords} searches, ~$${e.dataforseoUsd})</button>`;
   $('#decayRun').onclick = async () => {
     if (!e.keywords) return alert('No contests in scope under this profile.');

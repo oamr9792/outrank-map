@@ -107,3 +107,6 @@ svg.decay .grid { stroke: var(--line); stroke-width: 1; }
 svg.decay .line { fill: none; stroke: var(--accent); stroke-width: 2; }
 svg.decay .dot { fill: var(--accent); }
 svg.decay text { fill: var(--muted); font-size: 11px; }
+
+/* `hidden` must win over display rules such as .profile .row */
+[hidden] { display: none !important; }

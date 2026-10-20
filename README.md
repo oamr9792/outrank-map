@@ -66,9 +66,13 @@ above 0 under the profile), highest volume first, the study pulls 12 months
 of monthly Google snapshots (DataForSEO Labs historical SERPs, ~$0.0014 a
 search at the listed price; the real charge is logged and capped like
 `fetchSerps`). It charts the target's median position by month and gives one
-number: the median change between the latest month and six months before.
-A month where the target is missing counts as just below the last result,
-so dropping out shows as decay. Stored per study, shown in the report.
+number: per search, its latest snapshot against its own snapshot about six
+months earlier (4–8 months), and the median of those changes. Snapshots are
+irregular, so months covered by too few searches (under max(5, 25%)) are
+left off the line rather than read as a trend. A month where the target is
+missing counts as just below the last result, so dropping out shows as
+decay. Stored per study, recomputed from the stored history for free, and
+shown in the report.
 
 **Why winning pages win.** *Explain shortlist* looks up, for each starred
 domain's winning pages and the target pages they beat: URL rating and

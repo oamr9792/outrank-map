@@ -39,37 +39,67 @@ export function sampleKeywords(keywords, target, profile = {}, n = DEFAULT_SAMPL
 }
 
 const monthOf = (date) => date.slice(0, 7);
-const monthsBack = (month, n) => {
-  const [y, m] = month.split('-').map(Number);
-  const d = new Date(Date.UTC(y, m - 1 - n, 1));
-  return d.toISOString().slice(0, 7);
-};
+
+const monthsApart = (a, b) => (Date.parse(b) - Date.parse(a)) / (30.44 * 864e5);
+
+/** A month needs this many keywords to be drawn: fewer is a different mix of searches, not a trend. */
+export const minKeywordsPerMonth = (total) => Math.max(5, Math.ceil(total * 0.25));
 
 /**
- * Pure: per month, the median of each keyword's position (its latest
- * snapshot that month; missing = results + 1), and the median over keywords
- * of the change between the latest month and six months before it.
- * Positive change = the target moved down.
+ * Pure. Google's monthly snapshots are irregular: each keyword has some
+ * months and not others. So:
+ *
+ *  - series: per month, the median position over the keywords with a
+ *    snapshot that month (latest one wins; missing = results + 1). Months
+ *    with too few keywords are marked `thin` and left off the chart.
+ *  - change6: per keyword, its latest snapshot against its own snapshot
+ *    nearest to six months earlier (4–8 months back); the median of those
+ *    differences. Positive = the target moved down.
  */
 export function summarizeDecay(history) {
-  const perKw = new Map(); // keyword -> Map(month -> position)
+  const perKw = new Map(); // keyword -> [{ date, position, missing }] by date
   for (const [kw, snaps] of history) {
-    const byMonth = new Map();
-    for (const s of [...snaps].sort((a, b) => a.date.localeCompare(b.date))) {
-      byMonth.set(monthOf(s.date), { position: s.position ?? s.resultsCount + 1, missing: s.position == null });
-    }
-    if (byMonth.size) perKw.set(kw, byMonth);
+    const s = [...snaps].sort((a, b) => a.date.localeCompare(b.date)).map((x) => ({ date: x.date, position: x.position ?? x.resultsCount + 1, missing: x.position == null }));
+    if (s.length) perKw.set(kw, s);
   }
-  const months = [...new Set([...perKw.values()].flatMap((m) => [...m.keys()]))].sort();
+  const months = [...new Set([...perKw.values()].flatMap((s) => s.map((x) => monthOf(x.date))))].sort();
+  const floor = minKeywordsPerMonth(perKw.size);
   const series = months.map((month) => {
-    const here = [...perKw.values()].map((m) => m.get(month)).filter(Boolean);
-    return { month, median: median(here.map((h) => h.position)), keywords: here.length, missing: here.filter((h) => h.missing).length };
+    const here = [...perKw.values()].map((s) => s.filter((x) => monthOf(x.date) === month).at(-1)).filter(Boolean);
+    return { month, median: median(here.map((h) => h.position)), keywords: here.length, missing: here.filter((h) => h.missing).length, thin: here.length < floor };
   });
-  const latest = months.at(-1) ?? null;
-  const base = latest ? monthsBack(latest, 6) : null;
+
   const deltas = [];
-  for (const m of perKw.values()) if (latest && m.has(latest) && m.has(base)) deltas.push(m.get(latest).position - m.get(base).position);
-  return { series, latest, baseMonth: base, change6: median(deltas), change6Keywords: deltas.length, keywords: perKw.size };
+  const spans = [];
+  for (const s of perKw.values()) {
+    const last = s.at(-1);
+    let base = null;
+    for (const x of s) {
+      const gap = monthsApart(x.date, last.date);
+      if (gap >= 4 && gap <= 8 && (!base || Math.abs(gap - 6) < Math.abs(monthsApart(base.date, last.date) - 6))) base = x;
+    }
+    if (!base) continue;
+    deltas.push(last.position - base.position);
+    spans.push(monthsApart(base.date, last.date));
+  }
+  return {
+    series,
+    minKeywordsPerMonth: floor,
+    change6: median(deltas),
+    change6Keywords: deltas.length,
+    spanMonths: median(spans),
+    keywords: perKw.size,
+  };
+}
+
+/**
+ * The study's decay, recomputed from its stored history (free), with the
+ * fetch's date and cost. Null if history was never fetched.
+ */
+export function currentDecay(studyId) {
+  const study = getStudy(studyId);
+  if (!study?.decay) return null;
+  return { ...study.decay, ...summarizeDecay(loadHistory(studyId)) };
 }
 
 export function estimateDecay(studyId, profile, n = DEFAULT_SAMPLE) {

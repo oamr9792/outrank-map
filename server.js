@@ -303,11 +303,11 @@ async function api(req, res, url) {
         stats: byDomain.get(p.domain) ?? null,
         wins: domainDetail(data, study.target, p.domain, { profile }).filter((r) => r.outcome === 'win').slice(0, 8),
       }));
-      return send(res, 200, { study, scope, profile, summary, picks });
+      return send(res, 200, { study: { ...study, decay: decay.currentDecay(id) }, scope, profile, summary, picks });
     }
     if (sub === '/decay') {
       // GET: the stored decay and what a fetch would cost. POST: the fetch.
-      if (req.method === 'GET') return send(res, 200, { decay: study.decay, estimate: decay.estimateDecay(id, profile) });
+      if (req.method === 'GET') return send(res, 200, { decay: decay.currentDecay(id), estimate: decay.estimateDecay(id, profile) });
       if (req.method === 'POST') {
         const started = startJob('decay', async (log) => {
           job.studyId = id;

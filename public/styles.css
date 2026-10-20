@@ -101,3 +101,9 @@ td.weak { background: var(--neg-soft); }
 .profile .row label { min-width: 140px; }
 .profile .tabs { margin: 4px 0; width: max-content; max-width: 100%; flex-wrap: wrap; }
 select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; width: 100%; }
+
+svg.decay { width: 100%; max-width: 640px; height: auto; display: block; margin: 6px 0; }
+svg.decay .grid { stroke: var(--line); stroke-width: 1; }
+svg.decay .line { fill: none; stroke: var(--accent); stroke-width: 2; }
+svg.decay .dot { fill: var(--accent); }
+svg.decay text { fill: var(--muted); font-size: 11px; }

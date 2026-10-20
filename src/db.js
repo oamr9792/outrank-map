@@ -49,6 +49,17 @@ CREATE TABLE IF NOT EXISTS picks (
   PRIMARY KEY (study_id, domain)
 );
 
+-- The target's position on each historical monthly snapshot of a keyword
+-- (DataForSEO Labs historical SERPs). position is null when the target was
+-- not among the snapshot's results_count organic results.
+CREATE TABLE IF NOT EXISTS history (
+  keyword_id INTEGER NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+  snapshot_date TEXT NOT NULL,   -- yyyy-mm-dd
+  position INTEGER,
+  results_count INTEGER NOT NULL,
+  PRIMARY KEY (keyword_id, snapshot_date)
+);
+
 -- Page-level facts, keyed by URL so no study pays for the same page twice.
 CREATE TABLE IF NOT EXISTS page_metrics (
   url TEXT PRIMARY KEY,
@@ -94,6 +105,9 @@ const MIGRATIONS = [
   'ALTER TABLE studies ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL',
   // Hand-entered situation profile for the single-domain flow (JSON).
   'ALTER TABLE studies ADD COLUMN profile TEXT',
+  // Item 5: the decay summary at the last history fetch (JSON), and its cost.
+  'ALTER TABLE studies ADD COLUMN decay TEXT',
+  'ALTER TABLE studies ADD COLUMN history_cost REAL NOT NULL DEFAULT 0',
   // The client's name search volume: fetched (volume) or picked by hand (band).
   'ALTER TABLE clients ADD COLUMN volume INTEGER',
   'ALTER TABLE clients ADD COLUMN volume_band INTEGER',
@@ -153,7 +167,7 @@ export function listStudies() {
 
 export function getStudy(id) {
   const s = openDb().prepare('SELECT * FROM studies WHERE id = ?').get(id);
-  return s ? { ...s, params: JSON.parse(s.params), profile: s.profile ? JSON.parse(s.profile) : {} } : null;
+  return s ? { ...s, params: JSON.parse(s.params), profile: s.profile ? JSON.parse(s.profile) : {}, decay: s.decay ? JSON.parse(s.decay) : null } : null;
 }
 
 export function deleteStudy(id) {
@@ -302,3 +316,29 @@ export function savePageDate(url, { publishedAt, source, error, cost = 0 }) {
     )
     .run(url, publishedAt ?? null, source ?? 'none', new Date().toISOString(), error ?? null, cost);
 }
+
+// --- history (item 5) ------------------------------------------------------------------
+
+export function saveHistory(keywordId, snapshots, cost, studyId) {
+  tx((d) => {
+    d.prepare('DELETE FROM history WHERE keyword_id = ?').run(keywordId);
+    const ins = d.prepare('INSERT OR REPLACE INTO history (keyword_id, snapshot_date, position, results_count) VALUES (?, ?, ?, ?)');
+    for (const s of snapshots) ins.run(keywordId, s.date, s.position ?? null, s.resultsCount);
+    d.prepare('UPDATE studies SET history_cost = history_cost + ? WHERE id = ?').run(cost, studyId);
+  });
+}
+
+/** keyword_id -> [{ date, position, resultsCount }] for a study. */
+export function loadHistory(studyId) {
+  const rows = openDb()
+    .prepare('SELECT h.* FROM history h JOIN keywords k ON k.id = h.keyword_id WHERE k.study_id = ? ORDER BY h.keyword_id, h.snapshot_date')
+    .all(studyId);
+  const out = new Map();
+  for (const r of rows) {
+    if (!out.has(r.keyword_id)) out.set(r.keyword_id, []);
+    out.get(r.keyword_id).push({ date: r.snapshot_date, position: r.position, resultsCount: r.results_count });
+  }
+  return out;
+}
+
+export const saveDecay = (studyId, decay) => openDb().prepare('UPDATE studies SET decay = ? WHERE id = ?').run(JSON.stringify(decay), studyId);

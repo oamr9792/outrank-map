@@ -125,3 +125,34 @@ export async function rawHtml(url) {
   if (!html) throw new Error('no HTML stored');
   return { html, cost: crawl.cost + read.cost };
 }
+
+/**
+ * Monthly historical Google SERPs for a keyword (DataForSEO Labs), up to the
+ * last 12 months. Returns [{ date, results: [{ position, url, domain }] }],
+ * organic results only, position = rank_group as in serp().
+ */
+// Pricing page (October 2026): $0.00012 per SERP snapshot, ~12 a keyword.
+// Runs log the measured charge.
+export const USD_PER_HISTORY_KEYWORD = 12 * 0.00012;
+export async function historicalSerps(keyword, { locationCode = 2840, languageCode = 'en', dateFrom } = {}) {
+  const { task, cost } = await post('/dataforseo_labs/google/historical_serps/live', {
+    keyword,
+    location_code: locationCode,
+    language_code: languageCode,
+    ...(dateFrom ? { date_from: dateFrom } : {}),
+  });
+  const snapshots = [];
+  for (const month of task.result ?? []) {
+    for (const snap of month?.items ?? []) {
+      const date = String(snap?.datetime ?? '').slice(0, 10);
+      if (!/^\d{4}-\d\d-\d\d$/.test(date)) continue;
+      const results = [];
+      for (const it of snap.items ?? []) {
+        if (it?.type !== 'organic' || !it.url) continue;
+        results.push({ position: it.rank_group, url: it.url, domain: hostOf(it.url) ?? (it.domain ?? '').replace(/^www\./, '') });
+      }
+      snapshots.push({ date, results });
+    }
+  }
+  return { cost, snapshots };
+}

@@ -88,6 +88,32 @@ function profileLabel(p = {}) {
 /** The flag for a negative headline: its category, with the matched word on hover. */
 const negTag = (neg, suffix = '') => (neg ? `<span class="tag neg" title="matched “${esc(neg.word)}”">${esc(neg.category)}${suffix}</span>` : '');
 
+/** The target's median position by month, as a small inline SVG (1 at the top). */
+function decayChart(series) {
+  const pts = series.filter((s) => s.median != null);
+  if (pts.length < 2) return '<p class="muted">Not enough months to draw a line.</p>';
+  const W = 600, H = 170, L = 34, R = 10, T = 12, B = 26;
+  const max = Math.max(...pts.map((p) => p.median)), min = Math.min(...pts.map((p) => p.median));
+  const lo = Math.max(1, Math.floor(min - 1)), hi = Math.ceil(max + 1);
+  const x = (i) => L + (i * (W - L - R)) / (pts.length - 1);
+  const y = (v) => T + ((v - lo) * (H - T - B)) / Math.max(1, hi - lo);
+  const ticks = [lo, Math.round((lo + hi) / 2), hi];
+  return `<svg class="decay" viewBox="0 0 ${W} ${H}" role="img" aria-label="Target's median position by month">
+    ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${y(t)}" y2="${y(t)}" class="grid"/><text x="${L - 6}" y="${y(t) + 4}" text-anchor="end">#${t}</text>`).join('')}
+    <polyline points="${pts.map((p, i) => `${x(i)},${y(p.median)}`).join(' ')}" class="line"/>
+    ${pts.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.median)}" r="3" class="dot"><title>${p.month}: median #${p.median} over ${p.keywords} searches${p.missing ? `, ${p.missing} not in the results` : ''}</title></circle>`).join('')}
+    ${pts.map((p, i) => (i % Math.ceil(pts.length / 6) === 0 || i === pts.length - 1 ? `<text x="${x(i)}" y="${H - 6}" text-anchor="middle">${p.month}</text>` : '')).join('')}
+  </svg>`;
+}
+
+/** The one-number summary of decay, in words. */
+function decayLine(d) {
+  if (!d || d.change6 == null) return d ? 'Not enough history to compare six months.' : '';
+  const n = Math.abs(d.change6);
+  const dir = d.change6 > 0 ? `down ${n.toFixed(1)} positions (fading)` : d.change6 < 0 ? `up ${n.toFixed(1)} positions (strengthening)` : 'no change';
+  return `Median change since ${d.baseMonth}: ${dir}, over ${d.change6Keywords} searches.`;
+}
+
 /** Why a contest weighs what it does, for the drill-down's tooltip. */
 const partsLabel = (parts = {}) =>
   Object.keys(parts).length ? Object.entries(parts).map(([k, ok]) => `${PART_LABEL[k]} ${ok ? '✓' : '✗'}`).join(' · ') : 'no profile set: weight 1';
@@ -242,6 +268,7 @@ function renderStudy() {
       <div class="stat"><b>${num(summary.negativeContests)}</b><span>target page reads negative${Object.keys(summary.categories ?? {}).length ? `<br>${Object.entries(summary.categories).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${esc(c)} ${n}`).join(' · ')}` : ''}</span></div>
       <div class="stat"><b>${num(summary.targetAbsent)}</b><span>of ${num(summary.keywords)} SERPs: target gone since Ahrefs saw it</span></div>
     </div>
+    <section class="card" id="decayCard"></section>
     <section class="card profile">
       <h2>Situation profile <span class="muted">— weights each contest by how much it looks like your client's case</span></h2>
       <div class="tabs" id="pPresets">${[['saved', "Study's saved profile"], ...SCOPES, ['custom', 'Custom']].map(([k, l]) => `<button data-p="${k}" class="${k === state.pMode ? 'on' : ''}">${l}</button>`).join('')}</div>
@@ -293,6 +320,7 @@ function renderStudy() {
     state.view = 'report';
     loadReport();
   });
+  renderDecay(study);
   $('#explain').addEventListener('click', async () => {
     const { estimate: e } = await api(`/api/studies/${study.id}/explain`);
     if (!e.domains) return alert('Star at least one domain first: only shortlisted domains are explained.');
@@ -403,6 +431,22 @@ async function loadDomain(domain, scroll) {
   if (scroll) $('#detail').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// ---- decay (item 5) ----------------------------------------------------------------
+async function renderDecay(study) {
+  const { decay: d, estimate: e } = await api(`/api/studies/${study.id}/decay?${profileQuery()}`);
+  if (!$('#decayCard')) return;
+  $('#decayCard').innerHTML = `<h2>Does the target fade on its own?</h2>
+    ${d ? `<p><b>${esc(decayLine(d))}</b></p>${decayChart(d.series)}<p class="muted">The target's median position on ${d.keywords} of these searches, by month (DataForSEO historical snapshots, ${new Date(d.fetchedAt).toLocaleDateString()}, $${d.cost.toFixed(3)}). A month where it was missing counts as just below the last result.</p>` : '<p class="muted">Follows the target on its highest-volume searches in scope over the last 12 months.</p>'}
+    <button class="ghost" id="decayRun">${d ? 'Re-fetch' : 'Fetch'} 12-month history (${e.keywords} searches, ~$${e.dataforseoUsd})</button>`;
+  $('#decayRun').onclick = async () => {
+    if (!e.keywords) return alert('No contests in scope under this profile.');
+    if (!confirm(`Pull 12 months of Google history for ${e.keywords} searches (highest volume first, weighted in under the current profile)? DataForSEO, about $${e.dataforseoUsd} at the listed price; the real charge is logged.`)) return;
+    await api(`/api/studies/${study.id}/decay?${profileQuery()}`, { method: 'POST' }).catch((err) => alert(err.message));
+    refreshStatus();
+    if (!polling) polling = setInterval(tick, 3000);
+  };
+}
+
 // ---- shortlist & report -----------------------------------------------------------
 async function savePick(domain, note = '') {
   const { picks } = await api(`/api/studies/${state.studyId}/picks`, { method: 'PUT', body: JSON.stringify({ domain, note }) });
@@ -429,6 +473,7 @@ async function loadReport() {
       <h2>${esc(s.name || `Outranking ${s.target}`)}</h2>
       <p class="muted">Target: ${esc(s.target)} · ${esc(s.country.toUpperCase())} · weighted for: ${esc(scopeLabel)} · ${num(r.summary.contests)} person-name searches where the target ranks · generated ${new Date().toLocaleDateString()}</p>
       ${s.notes ? `<p class="notes">${esc(s.notes)}</p>` : ''}
+      ${s.decay ? `<p><b>${esc(decayLine(s.decay))}</b></p>${decayChart(s.decay.series)}` : ''}
       ${r.picks.length ? '' : '<p class="empty">Nothing shortlisted yet. Star domains in the study table to add them.</p>'}
       ${r.picks
         .map(

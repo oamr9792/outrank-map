@@ -16,6 +16,7 @@ installTrustStore((process.env.EXTRA_CA_CERTS || '').split(';').filter(Boolean))
 const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick, createClient, getClient, listClients, deleteClient, listTargets, setTargets, setClientVolume } = await import('./src/db.js');
 const clients = await import('./src/client.js');
 const pages = await import('./src/pages.js');
+const decay = await import('./src/decay.js');
 const auth = await import('./src/auth.js');
 const { createStudy, fetchSerps, estimate, DEFAULTS } = await import('./src/run.js');
 const { scoreDomains, domainDetail, cleanProfile, PRESETS, VOLUME_BANDS } = await import('./src/score.js');
@@ -303,6 +304,18 @@ async function api(req, res, url) {
         wins: domainDetail(data, study.target, p.domain, { profile }).filter((r) => r.outcome === 'win').slice(0, 8),
       }));
       return send(res, 200, { study, scope, profile, summary, picks });
+    }
+    if (sub === '/decay') {
+      // GET: the stored decay and what a fetch would cost. POST: the fetch.
+      if (req.method === 'GET') return send(res, 200, { decay: study.decay, estimate: decay.estimateDecay(id, profile) });
+      if (req.method === 'POST') {
+        const started = startJob('decay', async (log) => {
+          job.studyId = id;
+          await decay.runDecay(id, log, { profile });
+          log('Done.');
+        });
+        return send(res, started ? 202 : 409, started ? { started: true } : { error: 'a job is already running' });
+      }
     }
     if (sub === '/explain') {
       // GET: what is known (free) and what a run would cost. POST: the run.

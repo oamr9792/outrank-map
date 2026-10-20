@@ -37,7 +37,7 @@ const PORT = Number(process.env.PORT || 8801);
 const HOST = process.env.HOST || (process.env.RENDER ? '0.0.0.0' : '127.0.0.1');
 const LOGIN_REQUIRED = auth.initAuth({ host: HOST });
 const PUBLIC = path.join(ROOT, 'public');
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
+const MIME = { '.md': 'text/markdown; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 
 // One background job at a time: every job spends API units or money.
 const job = { running: false, kind: null, studyId: null, clientId: null, startedAt: null, finishedAt: null, log: [], error: null };

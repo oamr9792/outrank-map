@@ -1,3 +1,5 @@
+import { helpIcon, installHelp } from './help.js';
+
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const pct = (x) => `${(x * 100).toFixed(x < 0.1 ? 1 : 0)}%`;
@@ -127,10 +129,10 @@ function profileQuery() {
 }
 
 function profileFields(p = {}, idPrefix = 'pf') {
-  return `<label>Page type <select id="${idPrefix}Type"><option value="">any</option>${PAGE_TYPES.map((t) => `<option ${p.pageType === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-    <label>Target at # <input id="${idPrefix}Pos" type="number" min="1" max="100" value="${p.position ?? ''}" placeholder="any"></label>
-    <label>Volume band <select id="${idPrefix}Vol"><option value="">any</option>${VOLUME_LABELS.map((l, i) => `<option value="${i}" ${p.volumeBand === i ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-    <label>Negative category <select id="${idPrefix}Cat"><option value="">any</option><option value="*" ${p.category === '*' ? 'selected' : ''}>any negative headline</option>${(state.categories ?? []).filter((c) => c !== 'unspecified').map((c) => `<option ${p.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label>`;
+  return `<label>Page type${helpIcon('pageType')} <select id="${idPrefix}Type"><option value="">any</option>${PAGE_TYPES.map((t) => `<option ${p.pageType === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+    <label>Target at #${helpIcon('position')} <input id="${idPrefix}Pos" type="number" min="1" max="100" value="${p.position ?? ''}" placeholder="any"></label>
+    <label>Volume band${helpIcon('volumeBand')} <select id="${idPrefix}Vol"><option value="">any</option>${VOLUME_LABELS.map((l, i) => `<option value="${i}" ${p.volumeBand === i ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <label>Negative category${helpIcon('category')} <select id="${idPrefix}Cat"><option value="">any</option><option value="*" ${p.category === '*' ? 'selected' : ''}>any negative headline</option>${(state.categories ?? []).filter((c) => c !== 'unspecified').map((c) => `<option ${p.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label>`;
 }
 const readProfileFields = (idPrefix = 'pf') => ({
   pageType: $(`#${idPrefix}Type`).value || undefined,
@@ -211,7 +213,7 @@ $('#studies').addEventListener('click', async (e) => {
   state.studyId = Number(li.dataset.id);
   state.clientId = null;
   state.pMode = 'saved';
-  if (state.view === 'all' || state.view === 'clientReport') state.view = 'table';
+  if (['all', 'clientReport', 'guide'].includes(state.view)) state.view = 'table';
   state.domain = null;
   state.view = 'table';
   refreshStatus();
@@ -263,18 +265,18 @@ function renderStudy() {
       <div class="muted">${esc(study.target)} · ${esc(study.country.toUpperCase())} · ${wordsLabel(p)} person keywords · ${esc(p.device ?? 'desktop')} · target pos ≤ ${p.maxPosition}${p.minVolume ? ` · vol ≥ ${p.minVolume}` : ''}${p.maxVolume ? ` · vol ≤ ${p.maxVolume}` : ''} · ${num(study.ahrefs_units)} Ahrefs units · $${study.dfs_cost.toFixed(2)} DataForSEO</div></div>
     <textarea id="studyNotes" rows="2" placeholder="Notes on this study (saved automatically)">${esc(study.notes || '')}</textarea>
     <div class="stats">
-      <div class="stat"><b>${num(summary.contests)}</b><span>contests<br>(target in live top ${p.depth})</span></div>
-      <div class="stat"><b>${summary.effectiveContests.toFixed(1)}</b><span>effective contests<br>(sum of weights)</span></div>
-      <div class="stat"><b>${summary.targetAvgPosition?.toFixed(1) ?? '–'}</b><span>target's avg position</span></div>
-      <div class="stat"><b>${num(summary.targetTop3)}</b><span>target in top 3</span></div>
-      <div class="stat"><b>${num(summary.negativeContests)}</b><span>target page reads negative${Object.keys(summary.categories ?? {}).length ? `<br>${Object.entries(summary.categories).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${esc(c)} ${n}`).join(' · ')}` : ''}</span></div>
-      <div class="stat"><b>${num(summary.targetAbsent)}</b><span>of ${num(summary.keywords)} SERPs: target gone since Ahrefs saw it</span></div>
-      <div class="stat" title="Live position minus the position Ahrefs reported, over contests. Positive = the target has slipped since Ahrefs looked."><b>${summary.medianDrift == null ? '–' : `${summary.medianDrift > 0 ? '+' : ''}${summary.medianDrift}`}</b><span>median drift, Ahrefs → live<br>${summary.driftKeywords ? `${summary.driftOver3} of ${summary.driftKeywords} moved more than 3` : ''}</span></div>
+      <div class="stat"><b>${num(summary.contests)}</b><span>contests${helpIcon('contests')}<br>(target in live top ${p.depth})</span></div>
+      <div class="stat"><b>${summary.effectiveContests.toFixed(1)}</b><span>effective contests${helpIcon('effectiveContests')}<br>(sum of weights)</span></div>
+      <div class="stat"><b>${summary.targetAvgPosition?.toFixed(1) ?? '–'}</b><span>target's avg position${helpIcon('targetAvgPosition')}</span></div>
+      <div class="stat"><b>${num(summary.targetTop3)}</b><span>target in top 3${helpIcon('targetTop3')}</span></div>
+      <div class="stat"><b>${num(summary.negativeContests)}</b><span>target page reads negative${helpIcon('negativeContests')}${Object.keys(summary.categories ?? {}).length ? `<br>${Object.entries(summary.categories).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${esc(c)} ${n}`).join(' · ')}` : ''}</span></div>
+      <div class="stat"><b>${num(summary.targetAbsent)}</b><span>of ${num(summary.keywords)} SERPs: target gone since Ahrefs saw it${helpIcon('targetAbsent')}</span></div>
+      <div class="stat" title="Live position minus the position Ahrefs reported, over contests. Positive = the target has slipped since Ahrefs looked."><b>${summary.medianDrift == null ? '–' : `${summary.medianDrift > 0 ? '+' : ''}${summary.medianDrift}`}</b><span>median drift, Ahrefs → live${helpIcon('medianDrift')}<br>${summary.driftKeywords ? `${summary.driftOver3} of ${summary.driftKeywords} moved more than 3` : ''}</span></div>
     </div>
     <section class="card" id="decayCard"></section>
     <section class="card profile">
-      <h2>Situation profile <span class="muted">— weights each contest by how much it looks like your client's case</span></h2>
-      <div class="tabs" id="pPresets">${[['saved', "Study's saved profile"], ...SCOPES, ['custom', 'Custom']].map(([k, l]) => `<button data-p="${k}" class="${k === state.pMode ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <h2>Situation profile${helpIcon('profile')} <span class="muted">— weights each contest by how much it looks like your client's case</span></h2>
+      <div class="tabs" id="pPresets">${[['saved', "Study's saved profile"], ...SCOPES, ['custom', 'Custom']].map(([k, l]) => `<button data-p="${k}" class="${k === state.pMode ? 'on' : ''}">${l}</button>`).join('')}</div>${helpIcon('presets')}
       <p class="muted">In use: <b>${esc(profileLabel(state.data.profile))}</b>. Weights: page type 0.4 · target position within ±3 0.3 · volume band 0.2 · negative category 0.1; only the parts you set count, so a single part gives weights of 1 or 0.</p>
       <div class="row" id="pFields" ${state.pMode === 'custom' ? '' : 'hidden'}>${profileFields(state.pMode === 'custom' ? state.pCustom : state.data.profile)}</div>
       <div class="toolbar" style="margin:0"><button class="ghost" id="pApply" ${state.pMode === 'custom' ? '' : 'hidden'}>Apply</button>
@@ -284,7 +286,7 @@ function renderStudy() {
       <label style="flex:0;flex-direction:row;align-items:center;gap:6px;margin:0">Seen with target ≥ <input id="min" type="number" min="1" value="${state.min}" style="width:60px"></label>
       <input id="filter" placeholder="Filter domains" value="${esc(state.filter)}">
       <button id="openReport">Report (${state.picks.size} shortlisted)</button>
-      <button class="ghost" id="explain" title="Look up links and page age for the shortlisted domains' winning pages">Explain shortlist</button>
+      <button class="ghost" id="explain" title="Look up links and page age for the shortlisted domains' winning pages">Explain shortlist</button>${helpIcon('explain')}
       <a class="btn ghost" href="/api/studies/${study.id}/export.csv?${profileQuery()}">CSV</a>
       <button class="ghost" id="resume" title="Fetch any missing or failed SERPs">Resume / retry</button>
     </div>
@@ -360,7 +362,7 @@ function renderTable() {
       return (typeof x === 'string' || x == null ? String(x ?? '').localeCompare(String(y ?? '')) : x - y) * state.dir;
     })
     .slice(0, 300);
-  $('#domains thead').innerHTML = `<tr>${COLS.map(([k, l, n]) => `<th data-k="${k}" class="${n ? 'num' : ''}">${l}${state.sort === k ? (state.dir < 0 ? ' ↓' : ' ↑') : ''}</th>`).join('')}</tr>`;
+  $('#domains thead').innerHTML = `<tr>${COLS.map(([k, l, n]) => `<th data-k="${k}" class="${n ? 'num' : ''}">${l}${state.sort === k ? (state.dir < 0 ? ' ↓' : ' ↑') : ''}${helpIcon(k)}</th>`).join('')}</tr>`;
   $('#domains tbody').innerHTML = rows.length
     ? rows
         .map(
@@ -409,7 +411,7 @@ async function loadDomain(domain, scroll) {
       <button id="pickBtn" class="${picked ? 'ghost' : ''}">${picked ? '★ Shortlisted — remove' : '☆ Add to shortlist'}</button></div>
     ${picked ? `<textarea id="pickNote" rows="2" placeholder="Why this domain, angle, contact, status… (saved automatically)">${esc(state.picks.get(domain))}</textarea><p class="notes" id="explainLine"></p>` : ''}
     <div class="tablewrap"><table>
-      <thead><tr><th>Search</th><th class="num" title="How much this contest counts toward weighted reach">Weight</th><th class="num">Vol</th><th class="num">Them</th><th>Their page</th><th class="num">Target</th><th>Target's page</th></tr></thead>
+      <thead><tr><th>Search</th><th class="num">Weight${helpIcon('weight')}</th><th class="num">Vol</th><th class="num">Them</th><th>Their page</th><th class="num">Target</th><th>Target's page</th></tr></thead>
       <tbody>${rows
         .map(
           (r) => `<tr class="${r.outcome}">
@@ -438,7 +440,7 @@ async function loadDomain(domain, scroll) {
 async function renderDecay(study) {
   const { decay: d, estimate: e } = await api(`/api/studies/${study.id}/decay?${profileQuery()}`);
   if (!$('#decayCard')) return;
-  $('#decayCard').innerHTML = `<h2>Does the target fade on its own?</h2>
+  $('#decayCard').innerHTML = `<h2>Does the target fade on its own?${helpIcon('decay')}</h2>
     ${d ? `<p><b>${esc(decayLine(d))}</b></p>${decayChart(d.series)}<p class="muted">The target's median position on ${d.keywords} of these searches, by month (DataForSEO historical snapshots, ${new Date(d.fetchedAt).toLocaleDateString()}, $${d.cost.toFixed(3)}). A month where it was missing counts as just below the last result. Months with fewer than ${d.minKeywordsPerMonth} searches are left off the line${d.series.some((s) => s.thin) ? ` (${d.series.filter((s) => s.thin).map((s) => s.month).join(', ')})` : ''}, since a different mix of searches is not a trend.</p>` : '<p class="muted">Follows the target on its highest-volume searches in scope over the last 12 months.</p>'}
     <button class="ghost" id="decayRun">${d ? 'Re-fetch' : 'Fetch'} 12-month history (${e.keywords} searches, ~$${e.dataforseoUsd})</button>`;
   $('#decayRun').onclick = async () => {
@@ -535,7 +537,7 @@ $('#clients').addEventListener('click', async (e) => {
 });
 
 function openClient(id) {
-  if (state.view === 'all' || state.view === 'clientReport') state.view = 'table';
+  if (['all', 'clientReport', 'guide'].includes(state.view)) state.view = 'table';
   state.clientId = id;
   state.studyId = null;
   state.cDomain = null;
@@ -586,7 +588,7 @@ function renderClient() {
       <div class="muted">${esc(client.country.toUpperCase())} · name results ${client.serp_at ? `pulled ${new Date(client.serp_at).toLocaleString()}` : 'not pulled yet'} · $${(client.serp_cost ?? 0).toFixed(3)} DataForSEO spent
         <button class="ghost small" id="cResearch">Re-pull name results</button></div>
       <div class="row" style="align-items:flex-end;max-width:620px;margin-top:6px">
-        <label>Name's search volume band <select id="cBand"><option value="">any (not used in weighting)</option>${state.cdata.volumeBands.map((l, i) => `<option value="${i}" ${client.volume_band === i ? 'selected' : ''}>${l} searches a month</option>`).join('')}</select></label>
+        <label>Name's search volume band${helpIcon('nameVolume')} <select id="cBand"><option value="">any (not used in weighting)</option>${state.cdata.volumeBands.map((l, i) => `<option value="${i}" ${client.volume_band === i ? 'selected' : ''}>${l} searches a month</option>`).join('')}</select></label>
         <span class="muted" style="flex:1">${client.volume != null ? `Fetched: ${num(client.volume)} a month.` : 'Pick a band, or fetch the figure.'}</span>
         <button class="ghost small" id="cVolume">Fetch volume (~$${state.cdata.volumeTaskUsd.toFixed(3)})</button></div></div>
 
@@ -618,13 +620,13 @@ function renderClient() {
       <p class="muted">Situation profile (default): each host's contests are weighted by that host's own negative URL — its page type, position and headline — plus the name's volume band. A preset applies the same weighting to every host.</p>
       <div class="toolbar"><div class="tabs" id="cScopes">${[['profile', 'Situation profile'], ...SCOPES].map(([k, l]) => `<button data-scope="${k}" class="${k === state.cMode ? 'on' : ''}">${l}</button>`).join('')}</div>
         <input id="cFilter" placeholder="Filter domains" value="${esc(state.filter)}">
-        <button class="ghost" id="cExplain" title="Links and page age for the shortlisted domains' winning pages, against every host">Explain shortlist</button>
+        <button class="ghost" id="cExplain" title="Links and page age for the shortlisted domains' winning pages, against every host">Explain shortlist</button>${helpIcon('explain')}
         <button id="cReport">Plan report</button></div>
       <div class="tablewrap"><table id="cMerged"><thead></thead><tbody></tbody></table></div>
       <div id="cDetail" class="detail"></div>
     </section>
 
-    <section class="card"><h2>4 · Placements and outcomes</h2><div id="cPlacements"></div></section>`;
+    <section class="card"><h2>4 · Placements and outcomes${helpIcon('placements')}</h2><div id="cPlacements"></div></section>`;
 
   const hostInputs = () => {
     const urls = [...document.querySelectorAll('#cSerp input:checked')].map((b) => b.dataset.url);
@@ -782,9 +784,9 @@ function renderMerged() {
   const { hosts, domains } = state.merged;
   const f = state.filter.trim().toLowerCase();
   const rows = domains.filter((d) => !f || d.domain.includes(f)).slice(0, 300);
-  $('#cMerged thead').innerHTML = `<tr><th>★</th><th>Domain</th><th class="num">Merged reach</th><th class="num">In name results</th>
-    ${hosts.map((h) => `<th class="num" title="${h.counted ? '' : 'Too few searches to count toward the merged score'}">vs ${esc(h.domain)}<br><span class="muted">${h.studyId ? `${h.contests} searches (${h.effectiveContests.toFixed(1)} effective)${h.counted ? '' : ' · not counted'}` : 'not studied yet'}</span><br><span class="muted" title="Weighting profile for this host">${esc(profileLabel(h.profile))}</span></th>`).join('')}
-    <th class="num">Total wins</th><th>Access</th><th>Winning page types</th></tr>`;
+  $('#cMerged thead').innerHTML = `<tr><th>★${helpIcon('picked')}</th><th>Domain</th><th class="num">Merged reach${helpIcon('merged')}</th><th class="num">In name results${helpIcon('inNameSerp')}</th>
+    ${hosts.map((h) => `<th class="num" title="${h.counted ? '' : 'Too few searches to count toward the merged score'}">vs ${esc(h.domain)}${helpIcon('perHost')}<br><span class="muted">${h.studyId ? `${h.contests} searches (${h.effectiveContests.toFixed(1)} effective)${h.counted ? '' : ` · not counted${helpIcon('hostThin')}`}` : 'not studied yet'}</span><br><span class="muted" title="Weighting profile for this host">${esc(profileLabel(h.profile))}</span></th>`).join('')}
+    <th class="num">Total wins${helpIcon('wins')}</th><th>Access${helpIcon('access')}</th><th>Winning page types${helpIcon('types')}</th></tr>`;
   $('#cMerged tbody').innerHTML = rows.length
     ? rows
         .map(
@@ -932,7 +934,7 @@ function renderAllTable() {
       return (typeof p === 'string' || p == null ? String(p ?? '').localeCompare(String(q ?? '')) : p - q) * a.dir;
     })
     .slice(0, 300);
-  $('#allTable thead').innerHTML = `<tr>${ALL_COLS.map(([k, l, n]) => `<th data-k="${k}" class="${n ? 'num' : ''}">${l}${a.sort === k ? (a.dir < 0 ? ' ↓' : ' ↑') : ''}</th>`).join('')}</tr>`;
+  $('#allTable thead').innerHTML = `<tr>${ALL_COLS.map(([k, l, n]) => `<th data-k="${k}" class="${n ? 'num' : ''}">${l}${a.sort === k ? (a.dir < 0 ? ' ↓' : ' ↑') : ''}${helpIcon(k === 'contests' ? 'allContests' : k)}</th>`).join('')}</tr>`;
   $('#allTable tbody').innerHTML = rows.length
     ? rows
         .map(
@@ -1007,7 +1009,7 @@ async function renderPlacements() {
       <label style="flex:1;min-width:140px">Published <input name="publishedAt" type="date"></label>
       <button type="submit" style="margin-bottom:8px">Add placement</button>
     </form>
-    ${p.placements.length ? `<div class="tablewrap"><table><thead><tr><th>Placement</th><th class="num">Predicted</th><th>Published</th><th>History (oldest → newest)</th><th>Latest</th><th></th></tr></thead><tbody>
+    ${p.placements.length ? `<div class="tablewrap"><table><thead><tr><th>Placement</th><th class="num">Predicted${helpIcon('predicted')}</th><th>Published</th><th>History (oldest → newest)</th><th>Latest${helpIcon('outcome')}</th><th></th></tr></thead><tbody>
       ${p.placements.map((x) => `<tr>
         <td><a href="${href(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.domain)}</a><div class="u">${esc(x.url)}</div></td>
         <td class="num" title="Merged weighted reach of the domain when it was added">${x.predicted_reach == null ? '–' : pct(x.predicted_reach)}</td>
@@ -1043,9 +1045,9 @@ async function renderPlacements() {
 async function renderCalibration() {
   const { rows } = await api('/api/calibration').catch(() => ({ rows: [] }));
   if (!$('#calibration')) return;
-  $('#calibration').innerHTML = `<h2>Calibration: predicted vs observed</h2>
+  $('#calibration').innerHTML = `<h2>Calibration: predicted vs observed${helpIcon('calibration')}</h2>
     <p class="muted">Every checked placement: the merged weighted reach the tool gave its domain when it was added, against where it sat at its latest check. This is how to learn whether the scoring is right.</p>
-    ${rows.length ? `<div class="tablewrap"><table><thead><tr><th>Client</th><th>Domain</th><th class="num">Predicted</th><th class="num">Days live</th><th class="num">Checks</th><th class="num">Position</th><th>Outcome</th></tr></thead><tbody>
+    ${rows.length ? `<div class="tablewrap"><table><thead><tr><th>Client</th><th>Domain</th><th class="num">Predicted${helpIcon('predicted')}</th><th class="num">Days live</th><th class="num">Checks</th><th class="num">Position</th><th>Outcome${helpIcon('outcome')}</th></tr></thead><tbody>
     ${rows.map((r) => `<tr><td>${esc(r.client)}</td><td><a href="${href(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.domain)}</a></td><td class="num">${r.predictedReach == null ? '–' : pct(r.predictedReach)}</td><td class="num">${r.daysLive ?? '–'}</td><td class="num">${r.checks}</td><td class="num">${r.position ? `#${r.position}` : '–'}</td><td>${esc(OUTCOME_LABEL[r.outcome])} <span class="muted">${r.beaten}/${r.of}</span></td></tr>`).join('')}
     </tbody></table></div>` : '<p class="muted">No placements have been checked yet.</p>'}`;
 }
@@ -1116,3 +1118,65 @@ async function loadClientReport() {
   };
   $('#cPrint').onclick = () => window.print();
 }
+
+installHelp();
+
+// ---- quickstart guide -------------------------------------------------------------------
+// guide.md is the one source; this renders the small subset of Markdown it uses.
+
+function renderMarkdown(md) {
+  const inline = (s) =>
+    esc(s)
+      .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      .replace(/\*(.+?)\*/g, '<i>$1</i>')
+      .replace(/`(.+?)`/g, '<code>$1</code>');
+  const out = [];
+  const lines = md.replace(/\r/g, '').split('\n');
+  for (let i = 0; i < lines.length; ) {
+    const line = lines[i];
+    if (!line.trim()) { i++; continue; }
+    let m;
+    if ((m = line.match(/^(#{1,3})\s+(.*)$/))) {
+      out.push(`<h${m[1].length + 1} class="g">${inline(m[2])}</h${m[1].length + 1}>`);
+      i++;
+    } else if (line.startsWith('|')) {
+      const rows = [];
+      while (i < lines.length && lines[i].startsWith('|')) rows.push(lines[i++]);
+      const cells = (r) => r.replace(/^\||\|$/g, '').split('|').map((c) => c.trim());
+      const body = rows.filter((r) => !/^\|[\s:|-]+\|$/.test(r));
+      out.push(`<div class="tablewrap"><table><thead><tr>${cells(body[0]).map((c) => `<th>${inline(c)}</th>`).join('')}</tr></thead><tbody>${body.slice(1).map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+    } else if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
+      const ordered = /^\s*\d+\./.test(line);
+      const items = [];
+      while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*([-*]|\d+\.)\s+/, ''));
+      out.push(`<${ordered ? 'ol' : 'ul'}>${items.map((x) => `<li>${inline(x)}</li>`).join('')}</${ordered ? 'ol' : 'ul'}>`);
+    } else if (line.startsWith('>')) {
+      const q = [];
+      while (i < lines.length && lines[i].startsWith('>')) q.push(lines[i++].replace(/^>\s?/, ''));
+      out.push(`<p class="notes">${inline(q.join(' '))}</p>`);
+    } else {
+      const p = [];
+      while (i < lines.length && lines[i].trim() && !/^(#|\||>|\s*([-*]|\d+\.)\s)/.test(lines[i])) p.push(lines[i++]);
+      out.push(`<p>${inline(p.join(' '))}</p>`);
+    }
+  }
+  return out.join('\n');
+}
+
+async function openGuide() {
+  state.studyId = null;
+  state.clientId = null;
+  state.view = 'guide';
+  refreshStatus();
+  const md = await fetch('guide.md').then((r) => r.text()).catch(() => '# Guide unavailable');
+  if (state.view !== 'guide') return;
+  $('#view').innerHTML = `<article class="report guide">${renderMarkdown(md)}</article>`;
+  window.scrollTo(0, 0);
+}
+$('#openGuide').addEventListener('click', openGuide);
+document.addEventListener('click', (e) => {
+  if (e.target.id === 'emptyGuide') {
+    e.preventDefault();
+    openGuide();
+  }
+});

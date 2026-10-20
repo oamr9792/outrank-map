@@ -6,6 +6,10 @@ searches shaped like the client's own. A domain that beats the target on
 hundreds of other people's names is a good bet to beat it on the client's
 name too, if it carried a piece about them.
 
+**New here?** Read the plain-English quickstart: [public/guide.md](public/guide.md)
+(also the *Guide* button in the app). Every metric in the app has an ⓘ with
+what it is and what to use it for; the text lives in `public/help.js`.
+
 ## How it works
 
 1. **Ahrefs** (`site-explorer/organic-keywords`) lists the target's ranking

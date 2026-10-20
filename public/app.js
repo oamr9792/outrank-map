@@ -211,7 +211,7 @@ $('#studies').addEventListener('click', async (e) => {
   state.studyId = Number(li.dataset.id);
   state.clientId = null;
   state.pMode = 'saved';
-  if (state.view === 'all') state.view = 'table';
+  if (state.view === 'all' || state.view === 'clientReport') state.view = 'table';
   state.domain = null;
   state.view = 'table';
   refreshStatus();
@@ -534,7 +534,7 @@ $('#clients').addEventListener('click', async (e) => {
 });
 
 function openClient(id) {
-  if (state.view === 'all') state.view = 'table';
+  if (state.view === 'all' || state.view === 'clientReport') state.view = 'table';
   state.clientId = id;
   state.studyId = null;
   state.cDomain = null;
@@ -562,7 +562,9 @@ const ACTION_LABEL = { linked: 'study complete', reuse: 'will reuse a finished s
 
 /** Full render of the client page; `partial` redraws only plan + leaderboard. */
 async function loadClient(partial = false) {
+  if (state.view === 'clientReport') return loadClientReport();
   const id = state.clientId;
+  await loadClientPicks().catch(() => (state.cPicks = new Map()));
   const c = await api(`/api/clients/${id}`).catch((err) => ({ error: err.message }));
   if (id !== state.clientId) return;
   if (c.error) return ($('#view').innerHTML = `<div class="empty">${esc(c.error)}</div>`);
@@ -614,7 +616,9 @@ function renderClient() {
       <p class="muted">Merged = the domain's weighted reach against the host it does worst against. It is inferred from how each domain does against these hosts on other people's names, not a prediction for ${esc(client.name)}'s own results. ★ = already in ${esc(client.name)}'s name results: a property to strengthen, sorted first at equal score.</p>
       <p class="muted">Situation profile (default): each host's contests are weighted by that host's own negative URL — its page type, position and headline — plus the name's volume band. A preset applies the same weighting to every host.</p>
       <div class="toolbar"><div class="tabs" id="cScopes">${[['profile', 'Situation profile'], ...SCOPES].map(([k, l]) => `<button data-scope="${k}" class="${k === state.cMode ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <input id="cFilter" placeholder="Filter domains" value="${esc(state.filter)}"></div>
+        <input id="cFilter" placeholder="Filter domains" value="${esc(state.filter)}">
+        <button class="ghost" id="cExplain" title="Links and page age for the shortlisted domains' winning pages, against every host">Explain shortlist</button>
+        <button id="cReport">Plan report</button></div>
       <div class="tablewrap"><table id="cMerged"><thead></thead><tbody></tbody></table></div>
       <div id="cDetail" class="detail"></div>
     </section>
@@ -678,6 +682,24 @@ function renderClient() {
   $('#cFilter').oninput = (e) => {
     state.filter = e.target.value;
     renderMerged();
+  };
+  $('#cReport').onclick = () => {
+    state.view = 'clientReport';
+    loadClientReport();
+  };
+  $('#cExplain').onclick = async () => {
+    const { estimate: e } = await api(`/api/clients/${state.clientId}/explain`);
+    if (!e.domains) return alert('Star at least one domain in the table first.');
+    const paid = e.ahrefsPages || e.htmlPages;
+    if (!confirm(`${e.domains} shortlisted domain${e.domains === 1 ? '' : 's'} against ${e.hosts} host${e.hosts === 1 ? '' : 's'}: ${e.pages} pages, ${e.cached} already cached.
+
+` + (paid ? `Ahrefs: ${e.ahrefsPages} pages, about ${num(e.ahrefsUnits)} units.
+DataForSEO: ${e.htmlPages} pages, about $${e.dataforseoUsd}.
+
+Run it?` : 'Everything is cached: no cost. Run it?'))) return;
+    await api(`/api/clients/${state.clientId}/explain`, { method: 'POST' }).catch((err) => alert(err.message));
+    refreshStatus();
+    if (!polling) polling = setInterval(tick, 3000);
   };
 }
 
@@ -758,13 +780,14 @@ function renderMerged() {
   const { hosts, domains } = state.merged;
   const f = state.filter.trim().toLowerCase();
   const rows = domains.filter((d) => !f || d.domain.includes(f)).slice(0, 300);
-  $('#cMerged thead').innerHTML = `<tr><th>Domain</th><th class="num">Merged reach</th><th class="num">In name results</th>
+  $('#cMerged thead').innerHTML = `<tr><th>★</th><th>Domain</th><th class="num">Merged reach</th><th class="num">In name results</th>
     ${hosts.map((h) => `<th class="num" title="${h.counted ? '' : 'Too few searches to count toward the merged score'}">vs ${esc(h.domain)}<br><span class="muted">${h.studyId ? `${h.contests} searches (${h.effectiveContests.toFixed(1)} effective)${h.counted ? '' : ' · not counted'}` : 'not studied yet'}</span><br><span class="muted" title="Weighting profile for this host">${esc(profileLabel(h.profile))}</span></th>`).join('')}
     <th class="num">Total wins</th><th>Access</th><th>Winning page types</th></tr>`;
   $('#cMerged tbody').innerHTML = rows.length
     ? rows
         .map(
           (d) => `<tr data-cd="${esc(d.domain)}" class="${d.domain === state.cDomain ? 'on' : ''}">
+        <td><button class="star ${state.cPicks?.has(d.domain) ? 'on' : ''}" data-cstar="${esc(d.domain)}" title="Shortlist for the plan">${state.cPicks?.has(d.domain) ? '★' : '☆'}</button></td>
         <td>${d.inNameSerp ? '<span class="star on" title="Already in the name results">★</span> ' : ''}${esc(d.domain)}</td>
         <td class="num"><b>${pct(d.merged)}</b></td>
         <td class="num">${d.inNameSerp ? `#${d.inNameSerp}` : '–'}</td>
@@ -774,8 +797,10 @@ function renderMerged() {
         <td>${Object.entries(d.types).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t, n]) => `<span class="tag">${esc(t)} ${n}</span>`).join('')}</td></tr>`,
         )
         .join('')
-    : `<tr><td colspan="${hosts.length + 6}" class="muted">${hosts.some((h) => h.studyId) ? 'No domains match.' : 'Run the studies to see domains here.'}</td></tr>`;
+    : `<tr><td colspan="${hosts.length + 7}" class="muted">${hosts.some((h) => h.studyId) ? 'No domains match.' : 'Run the studies to see domains here.'}</td></tr>`;
   $('#cMerged tbody').onclick = (e) => {
+    const star = e.target.closest('[data-cstar]');
+    if (star) return toggleClientPick(star.dataset.cstar);
     const tr = e.target.closest('tr[data-cd]');
     if (tr) loadClientDomain(tr.dataset.cd, true);
   };
@@ -793,7 +818,9 @@ async function loadClientDomain(domain, scroll) {
   );
   $('#cDetail').innerHTML = `
     <div class="head"><h3>${esc(domain)}</h3>
+      <button id="cPickBtn" class="${state.cPicks?.has(domain) ? 'ghost' : ''}">${state.cPicks?.has(domain) ? '★ Shortlisted — remove' : '☆ Shortlist for the plan'}</button>
       <span class="muted">${d?.inNameSerp ? `Already at #${d.inNameSerp} for ${esc(state.cdata.client.name)}: <a href="${href(d.nameSerpUrl)}" target="_blank" rel="noopener noreferrer">${esc(d.nameSerpUrl)}</a>` : `Not in ${esc(state.cdata.client.name)}'s name results yet.`}</span></div>
+    ${state.cPicks?.has(domain) ? `<textarea id="cPickNote" rows="2" placeholder="Angle, contact, status… (saved automatically)">${esc(state.cPicks.get(domain))}</textarea>` : ''}
     ${parts
       .map(({ h, rows }) => {
         const wins = rows.filter((r) => r.outcome === 'win');
@@ -803,6 +830,11 @@ async function loadClientDomain(domain, scroll) {
         </tbody></table></div>${wins.length > 15 ? `<p class="muted">${wins.length - 15} more in <a href="#" data-open-study="${h.studyId}">study #${h.studyId}</a>.</p>` : ''}` : '<p class="muted">No wins against this host.</p>'}`;
       })
       .join('')}`;
+  $('#cPickBtn').onclick = () => toggleClientPick(domain);
+  $('#cPickNote')?.addEventListener('change', async (e) => {
+    await api(`/api/clients/${state.clientId}/picks`, { method: 'PUT', body: JSON.stringify({ domain, note: e.target.value }) });
+    await loadClientPicks();
+  });
   $('#cDetail').onclick = (e) => {
     const a = e.target.closest('[data-open-study]');
     if (!a) return;
@@ -1014,4 +1046,71 @@ async function renderCalibration() {
     ${rows.length ? `<div class="tablewrap"><table><thead><tr><th>Client</th><th>Domain</th><th class="num">Predicted</th><th class="num">Days live</th><th class="num">Checks</th><th class="num">Position</th><th>Outcome</th></tr></thead><tbody>
     ${rows.map((r) => `<tr><td>${esc(r.client)}</td><td><a href="${href(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.domain)}</a></td><td class="num">${r.predictedReach == null ? '–' : pct(r.predictedReach)}</td><td class="num">${r.daysLive ?? '–'}</td><td class="num">${r.checks}</td><td class="num">${r.position ? `#${r.position}` : '–'}</td><td>${esc(OUTCOME_LABEL[r.outcome])} <span class="muted">${r.beaten}/${r.of}</span></td></tr>`).join('')}
     </tbody></table></div>` : '<p class="muted">No placements have been checked yet.</p>'}`;
+}
+
+// ---- client shortlist & plan report (item 8) ---------------------------------------------
+
+async function loadClientPicks() {
+  const { picks } = await api(`/api/clients/${state.clientId}/picks`);
+  state.cPicks = new Map(picks.map((p) => [p.domain, p.note]));
+}
+
+async function toggleClientPick(domain) {
+  if (state.cPicks.has(domain)) {
+    if (state.cPicks.get(domain) && !confirm(`Remove ${domain} and its note from the shortlist?`)) return;
+    await api(`/api/clients/${state.clientId}/picks?d=${encodeURIComponent(domain)}`, { method: 'DELETE' });
+  } else await api(`/api/clients/${state.clientId}/picks`, { method: 'PUT', body: JSON.stringify({ domain, note: '' }) });
+  await loadClientPicks();
+  renderMerged();
+  if (state.cDomain === domain) loadClientDomain(domain, false);
+}
+
+const PLAN_OUTCOME_HINT = 'Inferred from how each domain does against these hosts on other people’s names; not a prediction for this name.';
+
+function planDomainBlock(s, hosts) {
+  const studied = hosts.filter((h) => h.studyId);
+  const why = studied.map((h) => (s.why[h.domain] ? `<li><b>vs ${esc(h.domain)}:</b> ${esc(s.why[h.domain])}</li>` : '')).join('');
+  const types = Object.entries(s.types).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([t]) => t).join(', ');
+  return `<section class="pick">
+    <h3>${esc(s.domain)} ${s.access ? `<span class="tag">${esc(s.access)}</span>` : ''}${s.inNameSerp ? ` <span class="tag win">now #${s.inNameSerp}</span>` : ''}</h3>
+    ${s.found
+      ? `<p>Weighted reach <b>${pct(s.merged)}</b> against ${studied.length > 1 ? `the hardest host${s.hardestHost ? ` (${esc(s.hardestHost)})` : ''}` : esc(studied[0]?.domain ?? 'the host')}${studied.length > 1 ? `; ${studied.map((h) => `${esc(h.domain)} ${pct(s.perHost[h.domain]?.reach ?? 0)}`).join(' · ')}` : ''}. Wins with ${esc(types || 'no page type yet')}${s.sections.length ? ` pages, mostly in ${s.sections.map(([x]) => esc(x)).join(', ')}` : ''}.</p>`
+      : '<p class="muted">Not seen against these hosts in the studies.</p>'}
+    ${why ? `<ul class="why">${why}</ul>` : ''}
+    ${s.inNameSerp && s.nameSerpUrl ? `<p class="muted">Existing page: ${esc(s.nameSerpUrl)}</p>` : ''}
+    ${s.note ? `<p class="notes">${esc(s.note)}</p>` : ''}
+  </section>`;
+}
+
+async function loadClientReport() {
+  const r = await api(`/api/clients/${state.clientId}/report`).catch((err) => ({ error: err.message }));
+  if (state.view !== 'clientReport') return;
+  if (r.error) return ($('#view').innerHTML = `<div class="empty">${esc(r.error)}</div>`);
+  const c = r.client;
+  $('#view').innerHTML = `
+    <div class="toolbar noprint"><button class="ghost" id="cBack">← Back to ${esc(c.name)}</button><button id="cPrint">Print / save as PDF</button></div>
+    <article class="report plan">
+      <h2>Plan: ${esc(c.name)}</h2>
+      <p class="muted">${esc(c.country.toUpperCase())} Google · name results pulled ${c.serpAt ? esc(new Date(c.serpAt).toLocaleDateString()) : '–'} · generated ${new Date().toLocaleDateString()}. ${PLAN_OUTCOME_HINT}</p>
+
+      <h3 class="sec">1. What Google shows for “${esc(c.name)}”</h3>
+      <table class="compact"><tbody>
+      ${r.serp.map((x) => `<tr class="${x.problem ? 'problem' : ''}"><td class="num">${x.position}</td><td>${esc(x.title || x.url)} <span class="muted">${esc(x.domain)}</span></td><td>${x.problem ? '<span class="tag neg">problem</span>' : ''}${x.shortlisted && !x.problem ? '<span class="tag win">shortlisted</span>' : ''}</td></tr>`).join('')}
+      </tbody></table>
+      ${r.offSerp.length ? `<p class="muted">Also flagged, outside the top ${r.serp.length}: ${r.offSerp.map((t) => esc(t.url)).join(', ')}</p>` : ''}
+
+      <h3 class="sec">2. Will the problem fade on its own?</h3>
+      ${r.hosts.map((h) => `<div class="decayblock"><b>${esc(h.domain)}</b>: ${h.decay ? `${esc(decayLine(h.decay))}${decayChart(h.decay.series)}` : `<span class="muted">${h.studyId ? `not measured; fetch the 12-month history on study #${h.studyId}.` : 'not studied yet.'}</span>`}</div>`).join('')}
+
+      <h3 class="sec">3. Strengthen what is already there</h3>
+      ${r.strengthen.length ? r.strengthen.map((s) => planDomainBlock(s, r.hosts)).join('') : '<p class="muted">No shortlisted domain is in the name results yet.</p>'}
+
+      <h3 class="sec">4. New placements</h3>
+      ${r.newPlacements.length ? r.newPlacements.map((s) => planDomainBlock(s, r.hosts)).join('') : '<p class="muted">No other shortlisted domains. Star domains in the client table to add them.</p>'}
+    </article>`;
+  $('#cBack').onclick = () => {
+    state.view = 'table';
+    loadClient();
+  };
+  $('#cPrint').onclick = () => window.print();
 }

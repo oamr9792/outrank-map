@@ -13,12 +13,13 @@ if (process.env.RENDER && !process.env.DB_PATH) {
 }
 installTrustStore((process.env.EXTRA_CA_CERTS || '').split(';').filter(Boolean));
 
-const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick, createClient, getClient, listClients, deleteClient, listTargets, setTargets, setClientVolume, deletePlacement } = await import('./src/db.js');
+const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick, createClient, getClient, listClients, deleteClient, listTargets, setTargets, setClientVolume, deletePlacement, listClientPicks, saveClientPick, removeClientPick } = await import('./src/db.js');
 const clients = await import('./src/client.js');
 const pages = await import('./src/pages.js');
 const decay = await import('./src/decay.js');
 const { allStudies } = await import('./src/allstudies.js');
 const placements = await import('./src/placements.js');
+const plan = await import('./src/plan.js');
 const auth = await import('./src/auth.js');
 const { createStudy, fetchSerps, estimate, DEFAULTS } = await import('./src/run.js');
 const { scoreDomains, domainDetail, cleanProfile, PRESETS, VOLUME_BANDS } = await import('./src/score.js');
@@ -251,6 +252,27 @@ async function api(req, res, url) {
       });
       return started ? send(res, 202, { started: true }) : busy();
     }
+    if (sub === '/picks') {
+      if (req.method === 'PUT') {
+        const { domain, note } = await readJson(req);
+        if (!domain) return send(res, 400, { error: 'domain required' });
+        saveClientPick(id, domain, note);
+      } else if (req.method === 'DELETE') removeClientPick(id, q.get('d') ?? '');
+      else if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
+      return send(res, 200, { picks: listClientPicks(id) });
+    }
+    if (sub === '/explain') {
+      if (req.method === 'GET') return send(res, 200, { estimate: plan.estimateClientExplain(id, studyData) });
+      if (req.method === 'POST') {
+        const started = startJob('explain', async (log) => {
+          job.clientId = id;
+          await plan.runClientExplain(id, studyData, log);
+          log('Done.');
+        });
+        return started ? send(res, 202, { started: true }) : busy();
+      }
+    }
+    if (req.method === 'GET' && sub === '/report') return send(res, 200, plan.clientReport(id, studyData));
     if (sub === '/placements') {
       if (req.method === 'POST') {
         const body = await readJson(req);

@@ -83,6 +83,17 @@ It reads stored SERPs only, scoring each study as its own page does, so the
 numbers reconcile. Over time it becomes the house ranking of placement
 domains by their power to beat the targets studied.
 
+**Plan report.** On a client's page, star domains in the merged table (with
+a note each) and press *Plan report*. It reads as a plan, in this order:
+what Google shows for the name (top 20, problem URLs marked); whether each
+problem host fades on its own (the decay figure and line, where fetched);
+the shortlisted domains already in the name results (properties to
+strengthen); then new placements — each with its weighted reach against
+the hardest host, the links-and-age sentence per host (*Explain shortlist*,
+confirmed and cached), its winning page types and sections, and the note.
+One line chart per host at most; about one printed page per host plus a
+tenth of a page per shortlisted domain.
+
 **Placements and calibration.** On a client's page, log each placement
 (URL, publish date); the domain's merged weighted reach at that moment is
 stored as its prediction. *Check now* is one live search for the client's

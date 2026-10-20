@@ -240,11 +240,12 @@ export function mergeHosts(hosts, { nameSerp = [], minContests = 10 } = {}) {
   for (const h of hosts) {
     for (const d of h.domains) {
       if (isHost(d.domain)) continue;
-      if (!candidates.has(d.domain)) candidates.set(d.domain, { domain: d.domain, access: d.access, perHost: {}, types: {} });
+      if (!candidates.has(d.domain)) candidates.set(d.domain, { domain: d.domain, access: d.access, perHost: {}, types: {}, sectionCounts: {} });
       const c = candidates.get(d.domain);
       // Weighted when the host was scored against a profile; plain reach otherwise.
       c.perHost[h.domain] = { reach: d.weightedReach ?? d.reach, rawReach: d.reach, wins: d.wins, appearances: d.appearances, contests: h.contests };
       for (const [t, n] of Object.entries(d.types)) c.types[t] = (c.types[t] ?? 0) + n;
+      for (const [s, n] of d.sections ?? []) c.sectionCounts[s] = (c.sectionCounts[s] ?? 0) + n;
     }
   }
 
@@ -257,8 +258,10 @@ export function mergeHosts(hosts, { nameSerp = [], minContests = 10 } = {}) {
       if (merged === null || r < merged) [merged, hardestHost] = [r, h.domain];
     }
     const serp = serpFor(c.domain);
+    const { sectionCounts, ...rest } = c;
     return {
-      ...c,
+      ...rest,
+      sections: Object.entries(sectionCounts).sort((x, y) => y[1] - x[1]).slice(0, 3),
       merged: merged ?? 0,
       hardestHost,
       totalWins: Object.values(c.perHost).reduce((a, p) => a + p.wins, 0),

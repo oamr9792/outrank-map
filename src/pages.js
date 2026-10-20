@@ -138,12 +138,12 @@ function sentence(e) {
 // --- the run ---------------------------------------------------------------------
 
 /** The pages to look up: each shortlisted domain's winning pages, plus the target's page in those contests. */
-function pagesFor(studyId) {
+function pagesFor(studyId, domains = null) {
   const study = getStudy(studyId);
   const data = loadStudyData(studyId);
   const byDomain = new Map();
   const urls = new Set();
-  for (const p of listPicks(studyId)) {
+  for (const p of domains ? domains.map((domain) => ({ domain })) : listPicks(studyId)) {
     const wins = domainDetail(data, study.target, p.domain).filter((r) => r.outcome === 'win');
     byDomain.set(p.domain, wins);
     for (const r of wins) {
@@ -155,8 +155,8 @@ function pagesFor(studyId) {
 }
 
 /** What a run would cost, counting only pages not already cached. */
-export function estimateExplain(studyId) {
-  const { byDomain, urls } = pagesFor(studyId);
+export function estimateExplain(studyId, domains = null) {
+  const { byDomain, urls } = pagesFor(studyId, domains);
   const cached = getPageMetrics(urls);
   const needAhrefs = urls.filter((u) => !cached.get(u)?.ahrefs_at);
   const needDate = urls.filter((u) => !cached.get(u)?.date_at);
@@ -172,10 +172,10 @@ export function estimateExplain(studyId) {
   };
 }
 
-export async function runExplain(studyId, log) {
-  const est = estimateExplain(studyId);
+export async function runExplain(studyId, log, { domains = null } = {}) {
+  const est = estimateExplain(studyId, domains);
   if (!est.domains) throw new Error('Shortlist (star) at least one domain first');
-  const { urls } = pagesFor(studyId);
+  const { urls } = pagesFor(studyId, domains);
   const cached = getPageMetrics(urls);
 
   const needAhrefs = urls.filter((u) => !cached.get(u)?.ahrefs_at);
@@ -229,8 +229,8 @@ export async function runExplain(studyId, log) {
 }
 
 /** Explanations for every shortlisted domain, from cached metrics only (free). */
-export function explanations(studyId) {
-  const { byDomain, urls } = pagesFor(studyId);
+export function explanations(studyId, domains = null) {
+  const { byDomain, urls } = pagesFor(studyId, domains);
   const metrics = getPageMetrics(urls);
   return Object.fromEntries([...byDomain].map(([domain, wins]) => [domain, explainDomain(wins, metrics)]));
 }

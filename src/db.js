@@ -60,6 +60,15 @@ CREATE TABLE IF NOT EXISTS history (
   PRIMARY KEY (keyword_id, snapshot_date)
 );
 
+-- Item 8: the client's own shortlist, starred in the merged table.
+CREATE TABLE IF NOT EXISTS client_picks (
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  domain TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  added_at TEXT NOT NULL,
+  PRIMARY KEY (client_id, domain)
+);
+
 -- Item 7: what was placed for a client, and where it and the negative URLs
 -- sat each time the user pressed "check now".
 CREATE TABLE IF NOT EXISTS placements (
@@ -413,3 +422,15 @@ export function listChecks(clientId = null) {
 
 export const allPlacements = () =>
   openDb().prepare('SELECT p.*, c.name AS client_name FROM placements p JOIN clients c ON c.id = p.client_id ORDER BY p.id').all();
+
+// --- client shortlist (item 8) -----------------------------------------------------------
+
+export const listClientPicks = (clientId) => openDb().prepare('SELECT domain, note, added_at FROM client_picks WHERE client_id = ? ORDER BY added_at').all(clientId);
+
+export function saveClientPick(clientId, domain, note) {
+  openDb()
+    .prepare('INSERT INTO client_picks (client_id, domain, note, added_at) VALUES (?, ?, ?, ?) ON CONFLICT (client_id, domain) DO UPDATE SET note = excluded.note')
+    .run(clientId, String(domain).toLowerCase().slice(0, 253), String(note ?? '').slice(0, 5000), new Date().toISOString());
+}
+
+export const removeClientPick = (clientId, domain) => openDb().prepare('DELETE FROM client_picks WHERE client_id = ? AND domain = ?').run(clientId, String(domain).toLowerCase());

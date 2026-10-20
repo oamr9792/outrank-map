@@ -110,3 +110,18 @@ svg.decay text { fill: var(--muted); font-size: 11px; }
 
 /* `hidden` must win over display rules such as .profile .row */
 [hidden] { display: none !important; }
+
+.report.plan h3.sec { font-size: 15px; margin: 18px 0 6px; border-bottom: 1px solid var(--line); padding-bottom: 4px; }
+.report.plan .pick { margin-top: 10px; padding-top: 8px; }
+.report.plan .pick p { margin: 4px 0; }
+.report.plan ul.why { margin: 4px 0 4px 18px; padding: 0; }
+table.compact td { padding: 3px 8px; font-size: 12px; }
+table.compact tr.problem td { background: var(--neg-soft); }
+.decayblock { margin: 6px 0 10px; }
+.decayblock svg.decay { max-width: 460px; }
+@media print {
+  .report.plan { font-size: 11px; }
+  .report.plan svg.decay { max-width: 380px; }
+  .report.plan .pick { break-inside: avoid; }
+  table.compact tr.problem td { background: #f4dcd9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

@@ -61,6 +61,15 @@ winning pages, printable to PDF. All of it is stored in the database.
 **Hosting.** See [DEPLOY.md](DEPLOY.md) (Render, password-protected). Locally
 on 127.0.0.1 with no `APP_PASSWORD` the login is skipped.
 
+**Negative categories.** The headline word list in `src/classify.js` is
+grouped into legal-criminal, civil-litigation, financial-distress,
+regulatory, conduct and reputation-opinion; `negativeTitle()` returns the
+matched word and its category. Generic words (accused, alleged, probe,
+investigation) are *unspecified*: they flag a headline, but any specific word
+in it decides the category, and on their own they match "any negative
+headline" in a profile. The study summary counts contests per category, and
+the profile can weight by one.
+
 Access tags (self-publish, profile/directory, press release, reference,
 community) are a fixed list in `src/classify.js`; untagged domains are
 earned media or unknown.

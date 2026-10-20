@@ -101,7 +101,7 @@ test('name SERP rows are flagged with negativeTitle', () => {
     { position: 1, url: 'https://x.com/p/jane-doe-sued-by-investors', domain: 'x.com', title: 'Jane Doe sued by investors' },
     { position: 2, url: 'https://linkedin.com/in/janedoe', domain: 'linkedin.com', title: 'Jane Doe - CEO' },
   ]);
-  assert.equal(a.negative, 'sued');
+  assert.deepEqual(a.negative, { word: 'sued', category: 'civil-litigation' });
   assert.equal(b.negative, null);
   assert.equal(b.type, 'profile');
 });

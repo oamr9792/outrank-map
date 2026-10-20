@@ -4,28 +4,54 @@
  */
 
 /**
- * Whether a headline reads as negative coverage of its subject. Matches on
- * whole words and stems; deliberately biased towards recall, since the filter
- * it feeds narrows a set and a human reads the result.
+ * Whether a headline reads as negative coverage of its subject, and what
+ * kind. Matches on whole words; deliberately biased towards recall, since the
+ * flag narrows a set and a human reads the result.
+ *
+ * Grouped by the kind of trouble, which is what a client conversation turns
+ * on (a lawsuit and a regulatory fine call for different responses). The
+ * `unspecified` words say something is wrong without saying what; a headline
+ * matching only those gets that category, and any specific word elsewhere in
+ * the headline takes precedence ("accused of fraud" is legal-criminal).
  */
-const NEGATIVE = [
-  'lawsuit', 'lawsuits', 'sue', 'sues', 'sued', 'suing', 'fraud', 'fraudulent', 'scam', 'scheme', 'ponzi',
-  'indicted', 'indictment', 'charged', 'charges', 'arrest', 'arrested', 'convicted', 'conviction', 'guilty',
-  'sentenced', 'sentence', 'sentences', 'prison', 'jail', 'plea', 'pleads', 'pleaded', 'trafficking', 'probe', 'investigation',
-  'investigated', 'subpoena', 'accused', 'accuses', 'alleged', 'allegedly', 'allegations', 'allege', 'alleges',
-  'foreclosure', 'foreclose', 'forecloses', 'default', 'defaults', 'defaulted', 'bankrupt', 'bankruptcy', 'chapter 11',
-  'evict', 'evicts', 'eviction', 'evictions', 'violations', 'violation', 'fined', 'penalty', 'settle', 'settles',
-  'settlement', 'dispute', 'feud', 'battle', 'clash', 'ousted', 'fired', 'resigns', 'scandal', 'misconduct', 'harassment',
-  'discrimination', 'bribery', 'bribe', 'embezzle', 'embezzlement', 'laundering', 'tax evasion', 'liens', 'lien',
-  'unpaid', 'owes', 'collapse', 'collapses', 'troubled', 'distressed', 'slumlord', 'worst', 'banned', 'barred',
-  'disbarred', 'revoked', 'expelled', 'deceptive', 'lied', 'cheated', 'stole', 'theft', 'raid', 'raided', 'fbi', 'sec',
-  'doj', 'attorney general', 'whistleblower', 'countersues', 'judgment', 'contempt', 'liquidation', 'receivership',
-];
-const NEG_RE = new RegExp(`\\b(${NEGATIVE.map((w) => w.replace(/ /g, '\\s+')).join('|')})\\b`, 'i');
+export const NEGATIVE_CATEGORIES = {
+  'legal-criminal': [
+    'fraud', 'fraudulent', 'scam', 'scheme', 'ponzi', 'indicted', 'indictment', 'charged', 'charges', 'arrest', 'arrested',
+    'convicted', 'conviction', 'guilty', 'sentenced', 'sentence', 'sentences', 'prison', 'jail', 'plea', 'pleads', 'pleaded',
+    'trafficking', 'bribery', 'bribe', 'embezzle', 'embezzlement', 'laundering', 'tax evasion', 'stole', 'theft', 'raid',
+    'raided', 'fbi', 'doj',
+  ],
+  'civil-litigation': [
+    'lawsuit', 'lawsuits', 'sue', 'sues', 'sued', 'suing', 'countersues', 'settle', 'settles', 'settlement', 'dispute',
+    'feud', 'battle', 'clash', 'judgment', 'contempt',
+  ],
+  'financial-distress': [
+    'foreclosure', 'foreclose', 'forecloses', 'default', 'defaults', 'defaulted', 'bankrupt', 'bankruptcy', 'chapter 11',
+    'liens', 'lien', 'unpaid', 'owes', 'collapse', 'collapses', 'distressed', 'liquidation', 'receivership', 'evict',
+    'evicts', 'eviction', 'evictions',
+  ],
+  regulatory: [
+    'fined', 'penalty', 'violations', 'violation', 'banned', 'barred', 'disbarred', 'revoked', 'expelled', 'sanctioned',
+    'censured', 'sec', 'finra', 'attorney general', 'subpoena',
+  ],
+  conduct: ['harassment', 'misconduct', 'scandal', 'fired', 'ousted', 'resigns', 'discrimination', 'deceptive', 'lied', 'cheated', 'whistleblower'],
+  'reputation-opinion': ['worst', 'slumlord', 'troubled'],
+  unspecified: ['accused', 'accuses', 'alleged', 'allegedly', 'allegations', 'allege', 'alleges', 'probe', 'investigation', 'investigated'],
+};
 
+const WORD_CATEGORY = new Map(Object.entries(NEGATIVE_CATEGORIES).flatMap(([cat, words]) => words.map((w) => [w, cat])));
+const NEG_RE = new RegExp(`\\b(${[...WORD_CATEGORY.keys()].map((w) => w.replace(/ /g, '\\s+')).join('|')})\\b`, 'gi');
+
+/** { word, category } for a negative headline, or null. */
 export function negativeTitle(title = '') {
-  const m = String(title).match(NEG_RE);
-  return m ? m[1].toLowerCase() : null;
+  let generic = null;
+  for (const m of String(title).matchAll(NEG_RE)) {
+    const word = m[1].toLowerCase().replace(/\s+/g, ' ');
+    const category = WORD_CATEGORY.get(word);
+    if (category !== 'unspecified') return { word, category };
+    generic ??= { word, category };
+  }
+  return generic;
 }
 
 /** What kind of page a URL is, from its host and path alone. */

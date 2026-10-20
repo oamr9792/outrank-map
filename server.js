@@ -19,6 +19,7 @@ const auth = await import('./src/auth.js');
 const { createStudy, fetchSerps, estimate, DEFAULTS } = await import('./src/run.js');
 const { scoreDomains, domainDetail, cleanProfile, PRESETS, VOLUME_BANDS } = await import('./src/score.js');
 const ahrefs = await import('./src/ahrefs.js');
+const { NEGATIVE_CATEGORIES } = await import('./src/classify.js');
 const dfs = await import('./src/dataforseo.js');
 
 openDb();
@@ -131,6 +132,7 @@ async function api(req, res, url) {
       dataforseoCap: dfs.budget(),
       defaults: DEFAULTS,
       loginRequired: LOGIN_REQUIRED,
+      negativeCategories: Object.keys(NEGATIVE_CATEGORIES),
     });
   }
   if (route === 'GET /api/estimate') return send(res, 200, estimate({ limit: q.get('limit'), maxPosition: q.get('maxPosition') }));

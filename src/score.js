@@ -56,8 +56,8 @@ export function cleanProfile(p = {}) {
   return out;
 }
 
-/** A contest's category: its negative word's category once item 3 adds them. */
-const categoryOf = (negative) => (negative ? negative.category ?? 'negative' : null);
+/** A contest's category: the category of its headline's negative word. */
+const categoryOf = (negative) => negative?.category ?? null;
 
 /**
  * How closely one contest matches the profile. Returns the weight and, per
@@ -167,6 +167,12 @@ export function scoreDomains(keywords, target, { profile = {}, minAppearances = 
       targetAvgPosition: n ? positions.reduce((a, b) => a + b, 0) / n : null,
       targetTop3: positions.filter((p) => p <= 3).length,
       negativeContests: set.filter((k) => k.target.negative).length,
+      // Contests per negative category of the target's headline.
+      categories: set.reduce((acc, k) => {
+        const c = categoryOf(k.target.negative);
+        if (c) acc[c] = (acc[c] ?? 0) + 1;
+        return acc;
+      }, {}),
     },
     profile,
     domains,

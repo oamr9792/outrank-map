@@ -123,8 +123,8 @@ export function hostProfile(client, hostTargets) {
     pageType: pageType(t.url),
     position: t.position_seen,
     volumeBand: client.volume_band,
-    // Until headlines carry categories, a negative headline matches any negative one.
-    category: negative ? negative.category ?? '*' : null,
+    // A headline that only says "accused" or "probe" matches any negative one.
+    category: negative ? (negative.category === 'unspecified' ? '*' : negative.category) : null,
   });
 }
 

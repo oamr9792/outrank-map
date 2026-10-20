@@ -85,6 +85,9 @@ function profileLabel(p = {}) {
   return bits.length ? bits.join(' · ') : 'every contest weighs 1';
 }
 
+/** The flag for a negative headline: its category, with the matched word on hover. */
+const negTag = (neg, suffix = '') => (neg ? `<span class="tag neg" title="matched “${esc(neg.word)}”">${esc(neg.category)}${suffix}</span>` : '');
+
 /** Why a contest weighs what it does, for the drill-down's tooltip. */
 const partsLabel = (parts = {}) =>
   Object.keys(parts).length ? Object.entries(parts).map(([k, ok]) => `${PART_LABEL[k]} ${ok ? '✓' : '✗'}`).join(' · ') : 'no profile set: weight 1';
@@ -100,7 +103,7 @@ function profileFields(p = {}, idPrefix = 'pf') {
   return `<label>Page type <select id="${idPrefix}Type"><option value="">any</option>${PAGE_TYPES.map((t) => `<option ${p.pageType === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
     <label>Target at # <input id="${idPrefix}Pos" type="number" min="1" max="100" value="${p.position ?? ''}" placeholder="any"></label>
     <label>Volume band <select id="${idPrefix}Vol"><option value="">any</option>${VOLUME_LABELS.map((l, i) => `<option value="${i}" ${p.volumeBand === i ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
-    <label>Negative category <select id="${idPrefix}Cat"><option value="">any</option><option value="*" ${p.category === '*' ? 'selected' : ''}>any negative headline</option></select></label>`;
+    <label>Negative category <select id="${idPrefix}Cat"><option value="">any</option><option value="*" ${p.category === '*' ? 'selected' : ''}>any negative headline</option>${(state.categories ?? []).filter((c) => c !== 'unspecified').map((c) => `<option ${p.category === c ? 'selected' : ''}>${c}</option>`).join('')}</select></label>`;
 }
 const readProfileFields = (idPrefix = 'pf') => ({
   pageType: $(`#${idPrefix}Type`).value || undefined,
@@ -116,6 +119,7 @@ async function refreshStatus() {
   $('#logout').hidden = !s.loginRequired;
   $('#creds').innerHTML = `<span class="pill ${s.ahrefs ? '' : 'off'}">Ahrefs ${s.ahrefs ? 'key set' : 'no key'}</span><span class="pill ${s.dataforseo ? '' : 'off'}">DataForSEO ${s.dataforseo ? 'set' : 'missing'}</span>`;
   state.defaults = s.defaults;
+  state.categories = s.negativeCategories ?? [];
   renderStudies(s.studies);
   renderClients(s.clients);
   const j = s.job;
@@ -235,7 +239,7 @@ function renderStudy() {
       <div class="stat"><b>${summary.effectiveContests.toFixed(1)}</b><span>effective contests<br>(sum of weights)</span></div>
       <div class="stat"><b>${summary.targetAvgPosition?.toFixed(1) ?? '–'}</b><span>target's avg position</span></div>
       <div class="stat"><b>${num(summary.targetTop3)}</b><span>target in top 3</span></div>
-      <div class="stat"><b>${num(summary.negativeContests)}</b><span>target page reads negative</span></div>
+      <div class="stat"><b>${num(summary.negativeContests)}</b><span>target page reads negative${Object.keys(summary.categories ?? {}).length ? `<br>${Object.entries(summary.categories).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${esc(c)} ${n}`).join(' · ')}` : ''}</span></div>
       <div class="stat"><b>${num(summary.targetAbsent)}</b><span>of ${num(summary.keywords)} SERPs: target gone since Ahrefs saw it</span></div>
     </div>
     <section class="card profile">
@@ -367,7 +371,7 @@ async function loadDomain(domain, scroll) {
         <td class="num pos">${r.them.position}</td>
         <td><a href="${href(r.them.url)}" target="_blank" rel="noopener noreferrer">${esc(r.them.title || r.them.url)}</a> <span class="tag">${esc(r.them.type)}</span><div class="u">${esc(r.them.url)}</div></td>
         <td class="num pos">${r.target.position}</td>
-        <td><a href="${href(r.target.url)}" target="_blank" rel="noopener noreferrer">${esc(r.target.title || r.target.url)}</a> ${r.target.negative ? `<span class="tag neg" title="matched “${esc(r.target.negative)}”">negative</span>` : ''}<span class="tag">${esc(r.target.type)}</span></td></tr>`,
+        <td><a href="${href(r.target.url)}" target="_blank" rel="noopener noreferrer">${esc(r.target.title || r.target.url)}</a> ${negTag(r.target.negative)}<span class="tag">${esc(r.target.type)}</span></td></tr>`,
         )
         .join('')}</tbody></table></div>`;
   $('#pickBtn').onclick = () => togglePick(domain);
@@ -517,7 +521,7 @@ function renderClient() {
         .map(
           (r) => `<tr><td><input type="checkbox" data-url="${esc(r.url)}" data-pos="${r.position}" ${picked.has(r.url) ? 'checked' : ''}></td>
           <td class="num pos">${r.position}</td>
-          <td><a href="${href(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title || r.url)}</a> ${r.negative ? `<span class="tag neg" title="matched “${esc(r.negative)}”">negative?</span>` : ''}<span class="tag">${esc(r.type)}</span><div class="u">${esc(r.url)}</div></td>
+          <td><a href="${href(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title || r.url)}</a> ${negTag(r.negative, '?')}<span class="tag">${esc(r.type)}</span><div class="u">${esc(r.url)}</div></td>
           <td>${esc(r.domain)}</td></tr>`,
         )
         .join('')}

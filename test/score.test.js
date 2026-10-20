@@ -60,7 +60,7 @@ test('drill-down lists wins first', () => {
 });
 
 test('classifiers', () => {
-  assert.equal(negativeTitle('Fort Worth couple sentenced to jail for $5M home-building scam'), 'sentenced');
+  assert.deepEqual(negativeTitle('Fort Worth couple sentenced to jail for $5M home-building scam'), { word: 'sentenced', category: 'legal-criminal' });
   assert.equal(negativeTitle('How Shanna Khan became queen of Fulton Market'), null);
   assert.equal(pageType('https://therealdeal.com/people/jon-gray/'), 'profile');
   assert.equal(pageType('https://therealdeal.com/miami/2026/10/13/jeff-bezos-linked-to-buyer/'), 'article');

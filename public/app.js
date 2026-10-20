@@ -49,7 +49,7 @@ $('#logout').addEventListener('click', async () => {
   showLogin();
 });
 
-const state = { studyId: null, scope: 'all', min: 2, sort: 'wins', dir: -1, filter: '', domain: null, data: null, picks: new Map(), view: 'table' };
+const state = { studyId: null, scope: 'all', min: 2, sort: 'wins', dir: -1, filter: '', domain: null, data: null, picks: new Map(), view: 'table', clientId: null, cdata: null, merged: null, cDomain: null, rerun: new Set(), defaults: null };
 const SCOPES = [
   ['all', 'All person searches'],
   ['negative', 'Target page reads negative'],
@@ -76,26 +76,37 @@ async function refreshStatus() {
   const s = await api('/api/status');
   $('#logout').hidden = !s.loginRequired;
   $('#creds').innerHTML = `<span class="pill ${s.ahrefs ? '' : 'off'}">Ahrefs ${s.ahrefs ? 'key set' : 'no key'}</span><span class="pill ${s.dataforseo ? '' : 'off'}">DataForSEO ${s.dataforseo ? 'set' : 'missing'}</span>`;
+  state.defaults = s.defaults;
   renderStudies(s.studies);
+  renderClients(s.clients);
   const j = s.job;
   $('#jobCard').hidden = !j.running && !j.log.length;
   $('#jobTitle').textContent = j.running ? 'Running…' : j.error ? 'Stopped' : 'Last run';
   $('#jobLog').textContent = j.log.join('\n');
   $('#jobLog').scrollTop = 1e9;
   $('#new button').disabled = j.running;
+  $('#newClient button').disabled = j.running;
   if (j.running && !polling) polling = setInterval(tick, 3000);
   if (!j.running && polling) {
     clearInterval(polling);
     polling = null;
-    if (j.studyId && !state.studyId) state.studyId = j.studyId;
-    if (state.studyId) loadStudy();
+    if (j.clientId && state.clientId === j.clientId) loadClient(j.kind !== 'name-serp');
+    else {
+      if (j.studyId && !state.studyId && !state.clientId) state.studyId = j.studyId;
+      if (state.studyId) loadStudy();
+    }
   }
   return s;
 }
 async function tick() {
   const s = await refreshStatus();
   // Show partial results as SERPs land.
-  if (s.job.running && s.job.studyId) {
+  if (s.job.running && s.job.clientId && state.clientId === s.job.clientId) {
+    // Only the plan and leaderboard: the name-SERP checklist may be mid-edit.
+    if (s.job.kind === 'client') loadClient(true);
+    return;
+  }
+  if (s.job.running && s.job.studyId && !state.clientId) {
     if (!state.studyId) state.studyId = s.job.studyId;
     if (state.studyId === s.job.studyId) loadStudy();
   }
@@ -128,6 +139,7 @@ $('#studies').addEventListener('click', async (e) => {
   const li = e.target.closest('li[data-id]');
   if (!li) return;
   state.studyId = Number(li.dataset.id);
+  state.clientId = null;
   state.domain = null;
   state.view = 'table';
   refreshStatus();
@@ -350,3 +362,300 @@ async function loadReport() {
 }
 
 refreshStatus().then(updateEstimate);
+
+// ---- clients -----------------------------------------------------------------
+// Start from a person: their name SERP, the problem URLs on it, a study per
+// problem host, and one merged leaderboard that has to beat every host.
+
+function renderClients(list) {
+  $('#clients').innerHTML = list.length
+    ? list
+        .map(
+          (c) => `<li data-cid="${c.id}" class="${c.id === state.clientId ? 'on' : ''}">
+            <span><b>${esc(c.name)}</b> <span class="muted">${esc(c.country.toUpperCase())} · ${c.targets} problem URL${c.targets === 1 ? '' : 's'}</span></span>
+            <button class="x" data-cdel="${c.id}" title="Delete client">×</button></li>`,
+        )
+        .join('')
+    : '<li class="muted">None yet.</li>';
+}
+
+$('#clients').addEventListener('click', async (e) => {
+  const del = e.target.closest('[data-cdel]');
+  if (del) {
+    e.stopPropagation();
+    if (!confirm('Delete this client? Their studies are kept.')) return;
+    await api(`/api/clients/${del.dataset.cdel}`, { method: 'DELETE' }).catch((err) => alert(err.message));
+    if (Number(del.dataset.cdel) === state.clientId) {
+      state.clientId = null;
+      $('#view').innerHTML = '<div class="empty">Run a study, or pick one on the left.</div>';
+    }
+    return refreshStatus();
+  }
+  const li = e.target.closest('li[data-cid]');
+  if (!li) return;
+  openClient(Number(li.dataset.cid));
+});
+
+function openClient(id) {
+  state.clientId = id;
+  state.studyId = null;
+  state.cDomain = null;
+  state.rerun = new Set();
+  refreshStatus();
+  loadClient();
+}
+
+const clientForm = $('#newClient');
+clientForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(clientForm));
+  const urls = String(f.urls || '').split(/\s+/).filter(Boolean);
+  try {
+    const { id } = await api('/api/clients', { method: 'POST', body: JSON.stringify({ name: f.name, country: f.country, urls }) });
+    clientForm.reset();
+    openClient(id);
+    if (!polling) polling = setInterval(tick, 3000);
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+const ACTION_LABEL = { linked: 'study complete', reuse: 'will reuse a finished study (free)', resume: 'will resume the unfinished study', new: 'new study' };
+
+/** Full render of the client page; `partial` redraws only plan + leaderboard. */
+async function loadClient(partial = false) {
+  const id = state.clientId;
+  const c = await api(`/api/clients/${id}`).catch((err) => ({ error: err.message }));
+  if (id !== state.clientId) return;
+  if (c.error) return ($('#view').innerHTML = `<div class="empty">${esc(c.error)}</div>`);
+  state.cdata = c;
+  if (!partial || !$('#cSerp')) renderClient();
+  renderPlan();
+  loadMerged();
+}
+
+function renderClient() {
+  const { client, targets } = state.cdata;
+  const picked = new Set(targets.map((t) => t.url));
+  const serp = client.serp ?? [];
+  const extra = targets.filter((t) => !serp.some((r) => r.url === t.url));
+  $('#view').innerHTML = `
+    <div class="head"><h3>${esc(client.name)}</h3>
+      <div class="muted">${esc(client.country.toUpperCase())} · name results ${client.serp_at ? `pulled ${new Date(client.serp_at).toLocaleString()}` : 'not pulled yet'} · $${(client.serp_cost ?? 0).toFixed(3)}
+        <button class="ghost small" id="cResearch">Re-pull name results</button></div></div>
+
+    <section class="card"><h2>1 · Google results for “${esc(client.name)}”</h2>
+      <p class="muted">Tick the results that are the problem. Headlines that match the negative word list are flagged; it is a rule-based guess, so check each one.</p>
+      ${serp.length ? '' : '<p class="empty">Pulling the name results… this takes about 30 seconds.</p>'}
+      <div class="tablewrap"><table id="cSerp"><thead><tr><th></th><th class="num">Pos</th><th>Result</th><th>Domain</th></tr></thead><tbody>
+      ${serp
+        .map(
+          (r) => `<tr><td><input type="checkbox" data-url="${esc(r.url)}" data-pos="${r.position}" ${picked.has(r.url) ? 'checked' : ''}></td>
+          <td class="num pos">${r.position}</td>
+          <td><a href="${href(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.title || r.url)}</a> ${r.negative ? `<span class="tag neg" title="matched “${esc(r.negative)}”">negative?</span>` : ''}<span class="tag">${esc(r.type)}</span><div class="u">${esc(r.url)}</div></td>
+          <td>${esc(r.domain)}</td></tr>`,
+        )
+        .join('')}
+      ${extra.map((t) => `<tr><td><input type="checkbox" data-url="${esc(t.url)}" data-pos="" checked></td><td class="num">–</td><td><span class="u">${esc(t.url)}</span> <span class="tag">added by hand</span></td><td>${esc(t.domain)}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div class="toolbar"><input id="cAddUrl" placeholder="Add a problem URL that is not in these results" style="flex:1"><button class="ghost" id="cAdd">Add</button></div>
+      <h2 style="margin-top:12px">Hosts to study</h2>
+      <p class="muted">Each problem URL is studied by its host. Edit a host to study the parent domain instead (e.g. events.example.com → example.com).</p>
+      <div id="cHosts"></div>
+      <button id="cSave">Save problem URLs</button>
+    </section>
+
+    <section class="card"><h2>2 · Studies per host</h2><div id="cPlan"></div></section>
+
+    <section class="card"><h2>3 · Domains that beat every host</h2>
+      <p class="muted">Merged = the domain's reach against the host it does worst against. It is inferred from how each domain does against these hosts on other people's names, not a prediction for ${esc(client.name)}'s own results. ★ = already in ${esc(client.name)}'s name results: a property to strengthen, sorted first at equal score.</p>
+      <div class="toolbar"><div class="tabs" id="cScopes">${SCOPES.map(([k, l]) => `<button data-scope="${k}" class="${k === state.scope ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <input id="cFilter" placeholder="Filter domains" value="${esc(state.filter)}"></div>
+      <div class="tablewrap"><table id="cMerged"><thead></thead><tbody></tbody></table></div>
+      <div id="cDetail" class="detail"></div>
+    </section>`;
+
+  const hostInputs = () => {
+    const urls = [...document.querySelectorAll('#cSerp input:checked')].map((b) => b.dataset.url);
+    const known = new Map(state.cdata.targets.map((t) => [t.url, t.domain]));
+    const hostOf = (u) => known.get(u) ?? new URL(u).hostname.replace(/^www\./, '');
+    $('#cHosts').innerHTML = urls.length
+      ? `<table><tbody>${urls.map((u) => `<tr><td class="u">${esc(u)}</td><td><input data-host-for="${esc(u)}" value="${esc(hostOf(u))}"></td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">No problem URLs ticked yet.</p>';
+  };
+  hostInputs();
+  $('#cSerp').addEventListener('change', hostInputs);
+  $('#cAdd').onclick = () => {
+    const u = $('#cAddUrl').value.trim();
+    if (!/^https?:\/\//i.test(u)) return alert('Enter a full URL starting with http(s)://');
+    $('#cSerp tbody').insertAdjacentHTML('beforeend', `<tr><td><input type="checkbox" data-url="${esc(u)}" data-pos="" checked></td><td class="num">–</td><td><span class="u">${esc(u)}</span> <span class="tag">added by hand</span></td><td></td></tr>`);
+    $('#cAddUrl').value = '';
+    hostInputs();
+  };
+  $('#cSave').onclick = async () => {
+    const targets = [...document.querySelectorAll('#cSerp input:checked')].map((b) => ({
+      url: b.dataset.url,
+      position: b.dataset.pos || null,
+      domain: document.querySelector(`[data-host-for="${CSS.escape(b.dataset.url)}"]`)?.value,
+    }));
+    try {
+      await api(`/api/clients/${state.clientId}/targets`, { method: 'PUT', body: JSON.stringify({ targets }) });
+      refreshStatus();
+      loadClient(true);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+  $('#cResearch').onclick = async () => {
+    if (!confirm('Pull the name results again? One DataForSEO call, about $0.005.')) return;
+    await api(`/api/clients/${state.clientId}/serp`, { method: 'POST' }).catch((err) => alert(err.message));
+    refreshStatus();
+    if (!polling) polling = setInterval(tick, 3000);
+  };
+  $('#cScopes').onclick = (e) => {
+    const b = e.target.closest('[data-scope]');
+    if (!b) return;
+    state.scope = b.dataset.scope;
+    document.querySelectorAll('#cScopes button').forEach((x) => x.classList.toggle('on', x === b));
+    loadMerged();
+  };
+  $('#cFilter').oninput = (e) => {
+    state.filter = e.target.value;
+    renderMerged();
+  };
+}
+
+function runForm() {
+  const d = state.defaults ?? {};
+  return `<div class="row">
+      <label>Keywords per host <input name="limit" type="number" min="1" max="10000" value="${d.limit ?? 300}"></label>
+      <label>Min words <input name="minWords" type="number" min="0" max="10" value="${d.minWords ?? 2}"></label>
+      <label>Max words <input name="maxWords" type="number" min="0" max="10" value="${d.maxWords ?? 2}"></label>
+      <label>Target pos ≤ <input name="maxPosition" type="number" min="1" max="100" value="${d.maxPosition ?? 20}"></label></div>`;
+}
+
+async function renderPlan() {
+  const { plan } = state.cdata;
+  if (!plan.length) return ($('#cPlan').innerHTML = '<p class="muted">Save at least one problem URL first.</p>');
+  const keep = $('#cRunForm') ? Object.fromEntries(new FormData($('#cRunForm'))) : null;
+  $('#cPlan').innerHTML = `
+    <table><thead><tr><th>Host</th><th class="num">URLs</th><th>Status</th><th>Re-run fresh</th></tr></thead><tbody>
+    ${plan
+      .map(
+        (h) => `<tr><td>${esc(h.domain)}</td><td class="num">${h.urls.length}</td>
+        <td>${esc(ACTION_LABEL[h.action] ?? h.action)}${h.studyId ? ` · <a href="#" data-open-study="${h.studyId}">study #${h.studyId}</a>` : ''}</td>
+        <td>${h.action === 'new' && !state.rerun.has(h.domain) ? '' : `<input type="checkbox" data-rerun="${esc(h.domain)}" ${state.rerun.has(h.domain) ? 'checked' : ''}>`}</td></tr>`,
+      )
+      .join('')}</tbody></table>
+    <form id="cRunForm">${runForm()}</form>
+    <p id="cEstimate" class="muted"></p>
+    <button id="cRun">Run studies</button>`;
+  if (keep) for (const [k, v] of Object.entries(keep)) if ($('#cRunForm')[k]) $('#cRunForm')[k].value = v;
+  const params = () => Object.fromEntries(new FormData($('#cRunForm')));
+  const est = async () => {
+    const p = params();
+    const e = await api(`/api/clients/${state.clientId}/estimate?limit=${encodeURIComponent(p.limit)}&maxPosition=${encodeURIComponent(p.maxPosition)}&rerun=${encodeURIComponent([...state.rerun].join(','))}`).catch(() => null);
+    if (e) $('#cEstimate').textContent = e.newStudies ? `${e.newStudies} new stud${e.newStudies === 1 ? 'y' : 'ies'}: up to ${num(e.ahrefsUnits)} Ahrefs units · ~$${e.dataforseoUsd} DataForSEO · ~${e.serpMinutes} min` : 'No new studies needed: nothing to pay for.';
+  };
+  est();
+  $('#cRunForm').oninput = est;
+  $('#cPlan').onclick = (e) => {
+    const a = e.target.closest('[data-open-study]');
+    if (a) {
+      e.preventDefault();
+      state.clientId = null;
+      state.studyId = Number(a.dataset.openStudy);
+      state.view = 'table';
+      refreshStatus();
+      loadStudy();
+    }
+  };
+  $('#cPlan').onchange = (e) => {
+    const b = e.target.closest('[data-rerun]');
+    if (!b) return;
+    b.checked ? state.rerun.add(b.dataset.rerun) : state.rerun.delete(b.dataset.rerun);
+    est();
+  };
+  $('#cRun').onclick = async () => {
+    try {
+      await api(`/api/clients/${state.clientId}/run`, { method: 'POST', body: JSON.stringify({ params: params(), rerun: [...state.rerun] }) });
+      state.rerun = new Set();
+      refreshStatus();
+      if (!polling) polling = setInterval(tick, 3000);
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+}
+
+async function loadMerged() {
+  const id = state.clientId;
+  const m = await api(`/api/clients/${id}/merged?scope=${state.scope}`).catch((err) => ({ error: err.message }));
+  if (id !== state.clientId || !$('#cMerged')) return;
+  if (m.error) return ($('#cMerged tbody').innerHTML = `<tr><td class="muted">${esc(m.error)}</td></tr>`);
+  state.merged = m;
+  renderMerged();
+  if (state.cDomain) loadClientDomain(state.cDomain, false);
+}
+
+function renderMerged() {
+  const { hosts, domains } = state.merged;
+  const f = state.filter.trim().toLowerCase();
+  const rows = domains.filter((d) => !f || d.domain.includes(f)).slice(0, 300);
+  $('#cMerged thead').innerHTML = `<tr><th>Domain</th><th class="num">Merged reach</th><th class="num">In name results</th>
+    ${hosts.map((h) => `<th class="num" title="${h.counted ? '' : 'Too few searches to count toward the merged score'}">vs ${esc(h.domain)}<br><span class="muted">${h.studyId ? `${h.contests} searches${h.counted ? '' : ' · not counted'}` : 'not studied yet'}</span></th>`).join('')}
+    <th class="num">Total wins</th><th>Access</th><th>Winning page types</th></tr>`;
+  $('#cMerged tbody').innerHTML = rows.length
+    ? rows
+        .map(
+          (d) => `<tr data-cd="${esc(d.domain)}" class="${d.domain === state.cDomain ? 'on' : ''}">
+        <td>${d.inNameSerp ? '<span class="star on" title="Already in the name results">★</span> ' : ''}${esc(d.domain)}</td>
+        <td class="num"><b>${pct(d.merged)}</b></td>
+        <td class="num">${d.inNameSerp ? `#${d.inNameSerp}` : '–'}</td>
+        ${hosts.map((h) => { const p = d.perHost[h.domain]; return `<td class="num ${h.domain === d.hardestHost && hosts.length > 1 ? 'weak' : ''}" title="${p.wins} wins of ${p.contests} searches">${h.studyId ? pct(p.reach) : '–'}</td>`; }).join('')}
+        <td class="num">${d.totalWins}</td>
+        <td>${d.access ? `<span class="tag">${esc(d.access)}</span>` : ''}</td>
+        <td>${Object.entries(d.types).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([t, n]) => `<span class="tag">${esc(t)} ${n}</span>`).join('')}</td></tr>`,
+        )
+        .join('')
+    : `<tr><td colspan="${hosts.length + 6}" class="muted">${hosts.some((h) => h.studyId) ? 'No domains match.' : 'Run the studies to see domains here.'}</td></tr>`;
+  $('#cMerged tbody').onclick = (e) => {
+    const tr = e.target.closest('tr[data-cd]');
+    if (tr) loadClientDomain(tr.dataset.cd, true);
+  };
+}
+
+/** Drill-down: the domain's winning pages against each host. */
+async function loadClientDomain(domain, scroll) {
+  state.cDomain = domain;
+  document.querySelectorAll('#cMerged tbody tr').forEach((tr) => tr.classList.toggle('on', tr.dataset.cd === domain));
+  const d = state.merged.domains.find((x) => x.domain === domain);
+  const parts = await Promise.all(
+    state.merged.hosts
+      .filter((h) => h.studyId)
+      .map(async (h) => ({ h, rows: (await api(`/api/studies/${h.studyId}/domain?d=${encodeURIComponent(domain)}&scope=${state.scope}`)).rows })),
+  );
+  $('#cDetail').innerHTML = `
+    <div class="head"><h3>${esc(domain)}</h3>
+      <span class="muted">${d?.inNameSerp ? `Already at #${d.inNameSerp} for ${esc(state.cdata.client.name)}: <a href="${href(d.nameSerpUrl)}" target="_blank" rel="noopener noreferrer">${esc(d.nameSerpUrl)}</a>` : `Not in ${esc(state.cdata.client.name)}'s name results yet.`}</span></div>
+    ${parts
+      .map(({ h, rows }) => {
+        const wins = rows.filter((r) => r.outcome === 'win');
+        return `<h2 style="margin-top:12px">vs ${esc(h.domain)}: ${wins.length} wins of ${rows.length} shared searches</h2>
+        ${wins.length ? `<div class="tablewrap"><table><thead><tr><th>Search</th><th class="num">Them</th><th>Their page</th><th class="num">${esc(h.domain)}</th></tr></thead><tbody>
+        ${wins.slice(0, 15).map((r) => `<tr><td>${esc(r.keyword)}</td><td class="num pos">${r.them.position}</td><td><a href="${href(r.them.url)}" target="_blank" rel="noopener noreferrer">${esc(r.them.title || r.them.url)}</a> <span class="tag">${esc(r.them.type)}</span></td><td class="num pos">${r.target.position}</td></tr>`).join('')}
+        </tbody></table></div>${wins.length > 15 ? `<p class="muted">${wins.length - 15} more in <a href="#" data-open-study="${h.studyId}">study #${h.studyId}</a>.</p>` : ''}` : '<p class="muted">No wins against this host.</p>'}`;
+      })
+      .join('')}`;
+  $('#cDetail').onclick = (e) => {
+    const a = e.target.closest('[data-open-study]');
+    if (!a) return;
+    e.preventDefault();
+    state.clientId = null;
+    state.studyId = Number(a.dataset.openStudy);
+    state.view = 'table';
+    refreshStatus();
+    loadStudy();
+  };
+  if (scroll) $('#cDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}

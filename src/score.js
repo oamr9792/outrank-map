@@ -115,3 +115,83 @@ export function domainDetail(keywords, target, domain, { scope = 'all' } = {}) {
   }
   return rows.sort((a, b) => (a.outcome === b.outcome ? b.volume - a.volume : a.outcome === 'win' ? -1 : 1));
 }
+
+/**
+ * Merges per-host leaderboards for one client. A client's name SERP usually
+ * has several negative hosts and a placement has to beat all of them, so a
+ * candidate's merged score is its reach against the host it does worst
+ * against (0 where it never beat or never met that host).
+ *
+ * Hosts with fewer than `minContests` contests still get a column but are
+ * left out of the minimum: a few searches say too little, and one thin host
+ * would otherwise pin every candidate to 0. If no host has enough, all count.
+ *
+ * Candidates already in the client's own name SERP are properties to
+ * strengthen rather than new placements; at equal score they sort first.
+ *
+ * @param hosts   [{ domain, studyId, contests, domains }] — `domains` as
+ *                returned by scoreDomains for that host's study
+ * @param o.nameSerp the client's name SERP rows [{ position, url, domain }]
+ */
+export function mergeHosts(hosts, { nameSerp = [], minContests = 10 } = {}) {
+  const hostNames = hosts.map((h) => h.domain);
+  const isHost = (d) => hostNames.some((h) => isTarget(d, h));
+  let counted = hosts.filter((h) => h.contests >= minContests);
+  if (!counted.length) counted = hosts.filter((h) => h.contests > 0);
+  const countedSet = new Set(counted.map((h) => h.domain));
+
+  const inSerp = new Map();
+  for (const r of nameSerp) {
+    if (!r.domain || isHost(r.domain)) continue;
+    const cur = inSerp.get(r.domain);
+    if (!cur || r.position < cur.position) inSerp.set(r.domain, { position: r.position, url: r.url });
+  }
+  const serpFor = (d) => {
+    let best = null;
+    for (const [dom, hit] of inSerp) if ((dom === d || dom.endsWith(`.${d}`)) && (!best || hit.position < best.position)) best = hit;
+    return best;
+  };
+
+  const candidates = new Map();
+  for (const h of hosts) {
+    for (const d of h.domains) {
+      if (isHost(d.domain)) continue;
+      if (!candidates.has(d.domain)) candidates.set(d.domain, { domain: d.domain, access: d.access, perHost: {}, types: {} });
+      const c = candidates.get(d.domain);
+      c.perHost[h.domain] = { reach: d.reach, wins: d.wins, appearances: d.appearances, contests: h.contests };
+      for (const [t, n] of Object.entries(d.types)) c.types[t] = (c.types[t] ?? 0) + n;
+    }
+  }
+
+  const domains = [...candidates.values()].map((c) => {
+    for (const h of hosts) c.perHost[h.domain] ??= { reach: 0, wins: 0, appearances: 0, contests: h.contests };
+    let merged = null;
+    let hardestHost = null;
+    for (const h of counted) {
+      const r = c.perHost[h.domain].reach;
+      if (merged === null || r < merged) [merged, hardestHost] = [r, h.domain];
+    }
+    const serp = serpFor(c.domain);
+    return {
+      ...c,
+      merged: merged ?? 0,
+      hardestHost,
+      totalWins: Object.values(c.perHost).reduce((a, p) => a + p.wins, 0),
+      inNameSerp: serp?.position ?? null,
+      nameSerpUrl: serp?.url ?? null,
+    };
+  });
+
+  domains.sort(
+    (x, y) =>
+      y.merged - x.merged ||
+      (x.inNameSerp === null) - (y.inNameSerp === null) ||
+      (x.inNameSerp ?? 0) - (y.inNameSerp ?? 0) ||
+      y.totalWins - x.totalWins,
+  );
+
+  return {
+    hosts: hosts.map((h) => ({ domain: h.domain, studyId: h.studyId, contests: h.contests, counted: countedSet.has(h.domain) })),
+    domains,
+  };
+}

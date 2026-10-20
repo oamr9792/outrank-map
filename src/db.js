@@ -48,10 +48,38 @@ CREATE TABLE IF NOT EXISTS picks (
   added_at TEXT NOT NULL,
   PRIMARY KEY (study_id, domain)
 );
+
+-- A client: a person whose own name SERP carries the negative results.
+CREATE TABLE IF NOT EXISTS clients (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  country TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  serp TEXT,                     -- JSON: live organic results for the name
+  serp_at TEXT,
+  serp_cost REAL NOT NULL DEFAULT 0
+);
+
+-- The negative URLs the user confirmed, and the study run against each host.
+CREATE TABLE IF NOT EXISTS client_targets (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  domain TEXT NOT NULL,          -- the host studied; editable, defaults to the URL's host
+  position_seen INTEGER,         -- in the name SERP when confirmed; null if added by hand
+  study_id INTEGER REFERENCES studies(id) ON DELETE SET NULL,
+  UNIQUE (client_id, url)
+);
 `;
 
 // Columns added after the first release, applied to older databases.
-const MIGRATIONS = ['ALTER TABLE studies ADD COLUMN name TEXT', "ALTER TABLE studies ADD COLUMN notes TEXT NOT NULL DEFAULT ''"];
+const MIGRATIONS = [
+  'ALTER TABLE studies ADD COLUMN name TEXT',
+  "ALTER TABLE studies ADD COLUMN notes TEXT NOT NULL DEFAULT ''",
+  // Set on studies the client flow created. A reused study keeps its own
+  // (possibly null) client_id; client_targets.study_id is the link either way.
+  'ALTER TABLE studies ADD COLUMN client_id INTEGER REFERENCES clients(id) ON DELETE SET NULL',
+];
 
 let db;
 
@@ -150,4 +178,73 @@ export function loadStudyData(studyId) {
     volume: k.volume,
     results: byKw.get(k.id) ?? [],
   }));
+}
+
+// --- clients -------------------------------------------------------------------
+
+const parseClient = (c) => (c ? { ...c, serp: c.serp ? JSON.parse(c.serp) : null } : null);
+
+export function createClient({ name, country }) {
+  const clean = String(name ?? '').trim().replace(/\s+/g, ' ').slice(0, 200);
+  if (!clean) throw new Error("Enter the client's name");
+  const { lastInsertRowid } = openDb()
+    .prepare('INSERT INTO clients (name, country, created_at) VALUES (?, ?, ?)')
+    .run(clean, String(country || 'us').toLowerCase().slice(0, 2), new Date().toISOString());
+  return Number(lastInsertRowid);
+}
+
+export const getClient = (id) => parseClient(openDb().prepare('SELECT * FROM clients WHERE id = ?').get(id));
+
+export function listClients() {
+  return openDb()
+    .prepare('SELECT c.id, c.name, c.country, c.created_at, c.serp_at, COUNT(t.id) AS targets FROM clients c LEFT JOIN client_targets t ON t.client_id = c.id GROUP BY c.id ORDER BY c.id DESC')
+    .all();
+}
+
+export const deleteClient = (id) => openDb().prepare('DELETE FROM clients WHERE id = ?').run(id);
+
+export function saveClientSerp(id, results, cost) {
+  openDb().prepare('UPDATE clients SET serp = ?, serp_at = ?, serp_cost = serp_cost + ? WHERE id = ?').run(JSON.stringify(results), new Date().toISOString(), cost, id);
+}
+
+export const listTargets = (clientId) => openDb().prepare('SELECT * FROM client_targets WHERE client_id = ? ORDER BY position_seen IS NULL, position_seen, id').all(clientId);
+
+/**
+ * Replaces the confirmed negative URLs. A target that is kept keeps its
+ * study link unless its host was edited.
+ */
+export function setTargets(clientId, targets) {
+  tx((d) => {
+    const old = new Map(listTargets(clientId).map((t) => [t.url, t]));
+    d.prepare('DELETE FROM client_targets WHERE client_id = ?').run(clientId);
+    const ins = d.prepare('INSERT OR IGNORE INTO client_targets (client_id, url, domain, position_seen, study_id) VALUES (?, ?, ?, ?, ?)');
+    for (const t of targets) {
+      const url = String(t.url ?? '').trim();
+      if (!/^https?:\/\//i.test(url)) throw new Error(`Not a URL: ${t.url}`);
+      const domain = normalizeDomain(t.domain || url);
+      const prev = old.get(url);
+      const pos = Number(t.position) > 0 ? Math.floor(Number(t.position)) : null;
+      ins.run(clientId, url, domain, pos, prev && prev.domain === domain ? prev.study_id : null);
+    }
+  });
+}
+
+export const linkTargetStudy = (clientId, domain, studyId) =>
+  openDb().prepare('UPDATE client_targets SET study_id = ? WHERE client_id = ? AND domain = ?').run(studyId, clientId, domain);
+
+/**
+ * The newest study of a domain in a country with every keyword fetched (or
+ * given up on) and at least one keyword: safe to reuse for another client.
+ */
+export function findReusableStudy(domain, country) {
+  return (
+    openDb()
+      .prepare(
+        `SELECT s.id FROM studies s JOIN keywords k ON k.study_id = s.id
+         WHERE s.target = ? AND s.country = ?
+         GROUP BY s.id HAVING COUNT(k.id) > 0 AND SUM(k.serp_at IS NULL AND k.serp_error IS NULL) = 0
+         ORDER BY s.id DESC LIMIT 1`,
+      )
+      .get(domain, country)?.id ?? null
+  );
 }

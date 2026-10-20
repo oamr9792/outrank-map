@@ -32,6 +32,18 @@ name too, if it carried a piece about them.
 5. **Drill-down.** Click a domain for every shared search: its URL and title
    vs the target's, win or loss.
 
+**Client flow.** Start from a person instead of a domain: enter the client's
+name (and optionally known negative URLs). The app pulls the live name SERP
+(depth 30, ~$0.005), flags headlines that match the negative word list, and
+you tick which results are the problem. Each problem URL's host gets a study:
+a finished study of the same domain and country is reused for free (tick
+*Re-run fresh* to replace it), otherwise a new one runs through the same
+`createStudy` / `fetchSerps`. The merged leaderboard scores each domain by its
+reach against the host it does worst against, with a column per host; hosts
+with fewer than 10 contests get a column but are left out of that minimum.
+Domains already in the client's name SERP are marked ★ (properties to
+strengthen) and sort first at equal score.
+
 **Saved work.** Name a study and add notes; star domains to shortlist them,
 with a note each; **Report** shows the shortlist with each domain's stats and
 winning pages, printable to PDF. All of it is stored in the database.

@@ -13,7 +13,8 @@ if (process.env.RENDER && !process.env.DB_PATH) {
 }
 installTrustStore((process.env.EXTRA_CA_CERTS || '').split(';').filter(Boolean));
 
-const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick } = await import('./src/db.js');
+const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick, createClient, getClient, listClients, deleteClient, listTargets, setTargets } = await import('./src/db.js');
+const clients = await import('./src/client.js');
 const auth = await import('./src/auth.js');
 const { createStudy, fetchSerps, estimate, DEFAULTS } = await import('./src/run.js');
 const { scoreDomains, domainDetail } = await import('./src/score.js');
@@ -31,11 +32,11 @@ const PUBLIC = path.join(ROOT, 'public');
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 
 // One background job at a time: every job spends API units or money.
-const job = { running: false, kind: null, studyId: null, startedAt: null, finishedAt: null, log: [], error: null };
+const job = { running: false, kind: null, studyId: null, clientId: null, startedAt: null, finishedAt: null, log: [], error: null };
 
 function startJob(kind, fn) {
   if (job.running) return false;
-  Object.assign(job, { running: true, kind, studyId: null, startedAt: new Date().toISOString(), finishedAt: null, log: [], error: null });
+  Object.assign(job, { running: true, kind, studyId: null, clientId: null, startedAt: new Date().toISOString(), finishedAt: null, log: [], error: null });
   const log = (line) => {
     job.log.push(line);
     if (job.log.length > 400) job.log.splice(0, job.log.length - 400);
@@ -123,6 +124,7 @@ async function api(req, res, url) {
   if (route === 'GET /api/status') {
     return send(res, 200, {
       studies: listStudies(),
+      clients: listClients(),
       job: { ...job, log: job.log.slice(-80) },
       ahrefs: ahrefs.hasKey(),
       dataforseo: dfs.hasCredentials(),
@@ -143,6 +145,82 @@ async function api(req, res, url) {
       log('Done.');
     });
     return send(res, started ? 202 : 409, started ? { started: true } : { error: 'a job is already running' });
+  }
+
+  // --- clients ------------------------------------------------------------------
+  const busy = () => send(res, 409, { error: 'a job is already running' });
+  // Pulls the client's name SERP as a job (it spends DataForSEO credit and
+  // shares the run's budget counter, so it must not overlap another job).
+  const nameSerpJob = (clientId, urls = []) =>
+    startJob('name-serp', async (log) => {
+      job.clientId = clientId;
+      log(`Pulling the live Google results for "${getClient(clientId).name}" (depth ${clients.NAME_SERP_DEPTH})…`);
+      const { cost, results } = await clients.fetchNameSerp(clientId);
+      log(`${results.length} organic results, $${cost.toFixed(3)}`);
+      if (urls.length) {
+        const norm = (u) => String(u).replace(/[#?].*$/, '').replace(/\/$/, '').toLowerCase();
+        const existing = listTargets(clientId).map((t) => ({ url: t.url, domain: t.domain, position: t.position_seen }));
+        const added = urls.map((u) => ({ url: u, position: results.find((r) => norm(r.url) === norm(u))?.position ?? null }));
+        setTargets(clientId, [...existing, ...added.filter((a) => !existing.some((e) => e.url === a.url))]);
+      }
+      log('Done. Confirm which results are the problem.');
+    });
+
+  if (route === 'POST /api/clients') {
+    if (job.running) return busy();
+    const body = await readJson(req);
+    const country = String(body.country || 'us').toLowerCase();
+    if (!dfs.LOCATION_CODES[country]) return send(res, 400, { error: `No location code for country "${country}"` });
+    const urls = [].concat(body.urls ?? []).map((u) => String(u).trim()).filter((u) => /^https?:\/\//i.test(u));
+    const id = createClient({ name: body.name, country });
+    nameSerpJob(id, urls);
+    return send(res, 202, { id });
+  }
+
+  const cm = url.pathname.match(/^\/api\/clients\/(\d+)(\/[a-z]+)?$/);
+  if (cm) {
+    const id = Number(cm[1]);
+    const client = getClient(id);
+    if (!client) return send(res, 404, { error: 'no such client' });
+    const sub = cm[2] ?? '';
+    const scope = ['all', 'negative', 'article'].includes(q.get('scope')) ? q.get('scope') : 'all';
+    const rerun = (q.get('rerun') ?? '').split(',').filter(Boolean);
+
+    if (req.method === 'GET' && !sub) {
+      return send(res, 200, {
+        client: { ...client, serp: clients.annotateSerp(client.serp ?? []) },
+        targets: listTargets(id),
+        plan: clients.planHosts(id),
+      });
+    }
+    if (req.method === 'DELETE' && !sub) {
+      if (job.running && job.clientId === id) return busy();
+      deleteClient(id);
+      return send(res, 200, { ok: true });
+    }
+    if (req.method === 'POST' && sub === '/serp') return nameSerpJob(id) ? send(res, 202, { started: true }) : busy();
+    if (req.method === 'PUT' && sub === '/targets') {
+      if (job.running && job.clientId === id) return busy();
+      const { targets } = await readJson(req);
+      setTargets(id, [].concat(targets ?? []));
+      return send(res, 200, { targets: listTargets(id), plan: clients.planHosts(id) });
+    }
+    if (req.method === 'GET' && sub === '/estimate') {
+      return send(res, 200, clients.estimateClient(id, { limit: q.get('limit'), maxPosition: q.get('maxPosition') }, { rerun }));
+    }
+    if (req.method === 'POST' && sub === '/run') {
+      const body = await readJson(req);
+      const started = startJob('client', async (log) => {
+        job.clientId = id;
+        await clients.runClient(id, body.params ?? {}, log, { rerun: [].concat(body.rerun ?? []) });
+        log('Done.');
+      });
+      return started ? send(res, 202, { started: true }) : busy();
+    }
+    if (req.method === 'GET' && sub === '/merged') {
+      return send(res, 200, clients.mergedForClient(id, studyData, { scope, minContests: Math.max(1, Number(q.get('minContests') || 10)) }));
+    }
+    return send(res, 404, { error: 'not found' });
   }
 
   const m = url.pathname.match(/^\/api\/studies\/(\d+)(\/[a-z.]+)?$/);

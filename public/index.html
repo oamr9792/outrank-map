@@ -17,7 +17,23 @@
   <main>
     <aside>
       <section class="card">
-        <h2>New study</h2>
+        <h2>New client</h2>
+        <form id="newClient">
+          <label>Client's name <input name="name" placeholder="Jane Doe" required></label>
+          <label>Country <input name="country" value="us" maxlength="2" size="3"></label>
+          <label>Negative URLs <span class="muted">(optional, one per line)</span><textarea name="urls" rows="2" placeholder="https://…"></textarea></label>
+          <p class="muted">Pulls the live Google results for the name (~$0.005), then you confirm which are the problem.</p>
+          <button type="submit">Search the name</button>
+        </form>
+      </section>
+
+      <section class="card">
+        <h2>Clients</h2>
+        <ul id="clients" class="studies"></ul>
+      </section>
+
+      <section class="card">
+        <h2>New study <span class="muted">(single domain)</span></h2>
         <form id="new">
           <label>Target domain <input name="target" placeholder="therealdeal.com" required></label>
           <div class="row">

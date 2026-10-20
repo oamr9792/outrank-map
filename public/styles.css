@@ -92,3 +92,7 @@ textarea { font: inherit; color: var(--ink); background: var(--panel); border: 1
   .report { padding: 0; }
   .report .pick { break-inside: avoid-page; }
 }
+
+button.small { padding: 2px 8px; font-size: 12px; margin-left: 6px; }
+td.weak { background: var(--neg-soft); }
+.view .card h2 { font-size: 14px; }

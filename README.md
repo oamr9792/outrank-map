@@ -83,6 +83,17 @@ It reads stored SERPs only, scoring each study as its own page does, so the
 numbers reconcile. Over time it becomes the house ranking of placement
 domains by their power to beat the targets studied.
 
+**Placements and calibration.** On a client's page, log each placement
+(URL, publish date); the domain's merged weighted reach at that moment is
+stored as its prediction. *Check now* is one live search for the client's
+name (depth 30, ~$0.005, confirmed first; nothing runs on its own) and logs
+where every placement and every problem URL sits. Each placement's history
+shows its positions and its outcome at the latest check: above every
+negative URL, above some, below all, or not in the top 30. Under *All
+studies*, the calibration table lists every checked placement across
+clients, predicted reach against observed outcome: the way to learn
+whether the scoring is right.
+
 **Why winning pages win.** *Explain shortlist* looks up, for each starred
 domain's winning pages and the target pages they beat: URL rating and
 referring domains (Ahrefs `batch-analysis`, 100 URLs a request) and the

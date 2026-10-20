@@ -60,6 +60,37 @@ CREATE TABLE IF NOT EXISTS history (
   PRIMARY KEY (keyword_id, snapshot_date)
 );
 
+-- Item 7: what was placed for a client, and where it and the negative URLs
+-- sat each time the user pressed "check now".
+CREATE TABLE IF NOT EXISTS placements (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  domain TEXT NOT NULL,
+  url TEXT NOT NULL,
+  published_at TEXT,             -- yyyy-mm-dd
+  keyword TEXT NOT NULL,         -- the client's name, as searched
+  predicted_reach REAL,          -- the domain's merged weighted reach when added
+  created_at TEXT NOT NULL,
+  UNIQUE (client_id, url)
+);
+CREATE TABLE IF NOT EXISTS checks (
+  id INTEGER PRIMARY KEY,
+  client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  checked_at TEXT NOT NULL,
+  keyword TEXT NOT NULL,
+  cost REAL NOT NULL DEFAULT 0
+);
+-- One row per placement and per negative URL per check; position null = not
+-- in the results fetched.
+CREATE TABLE IF NOT EXISTS position_log (
+  check_id INTEGER NOT NULL REFERENCES checks(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL,            -- placement | negative
+  url TEXT NOT NULL,
+  placement_id INTEGER REFERENCES placements(id) ON DELETE CASCADE,
+  position INTEGER,
+  PRIMARY KEY (check_id, kind, url)
+);
+
 -- Page-level facts, keyed by URL so no study pays for the same page twice.
 CREATE TABLE IF NOT EXISTS page_metrics (
   url TEXT PRIMARY KEY,
@@ -342,3 +373,43 @@ export function loadHistory(studyId) {
 }
 
 export const saveDecay = (studyId, decay) => openDb().prepare('UPDATE studies SET decay = ? WHERE id = ?').run(JSON.stringify(decay), studyId);
+
+// --- placements (item 7) -----------------------------------------------------------------
+
+export function addPlacement(clientId, { url, domain, publishedAt, keyword, predictedReach }) {
+  const clean = String(url ?? '').trim();
+  if (!/^https?:\/\//i.test(clean)) throw new Error(`Not a URL: ${url}`);
+  const date = publishedAt && /^\d{4}-\d\d-\d\d$/.test(publishedAt) ? publishedAt : null;
+  openDb()
+    .prepare(
+      `INSERT INTO placements (client_id, domain, url, published_at, keyword, predicted_reach, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (client_id, url) DO UPDATE SET published_at = excluded.published_at`,
+    )
+    .run(clientId, normalizeDomain(domain || clean), clean, date, keyword, predictedReach ?? null, new Date().toISOString());
+}
+
+export const listPlacements = (clientId) => openDb().prepare('SELECT * FROM placements WHERE client_id = ? ORDER BY id').all(clientId);
+export const deletePlacement = (clientId, id) => openDb().prepare('DELETE FROM placements WHERE client_id = ? AND id = ?').run(clientId, id);
+
+/** Records one check: rows = [{ kind, url, placementId, position }]. */
+export function saveCheck(clientId, keyword, rows, cost) {
+  return tx((d) => {
+    const { lastInsertRowid } = d.prepare('INSERT INTO checks (client_id, checked_at, keyword, cost) VALUES (?, ?, ?, ?)').run(clientId, new Date().toISOString(), keyword, cost);
+    const ins = d.prepare('INSERT OR REPLACE INTO position_log (check_id, kind, url, placement_id, position) VALUES (?, ?, ?, ?, ?)');
+    for (const r of rows) ins.run(lastInsertRowid, r.kind, r.url, r.placementId ?? null, r.position ?? null);
+    return Number(lastInsertRowid);
+  });
+}
+
+/** Every check for a client (or all clients), newest first, with its rows. */
+export function listChecks(clientId = null) {
+  const d = openDb();
+  const checks = clientId == null
+    ? d.prepare('SELECT * FROM checks ORDER BY checked_at DESC, id DESC').all()
+    : d.prepare('SELECT * FROM checks WHERE client_id = ? ORDER BY checked_at DESC, id DESC').all(clientId);
+  const rows = d.prepare('SELECT * FROM position_log WHERE check_id = ?');
+  return checks.map((c) => ({ ...c, rows: rows.all(c.id) }));
+}
+
+export const allPlacements = () =>
+  openDb().prepare('SELECT p.*, c.name AS client_name FROM placements p JOIN clients c ON c.id = p.client_id ORDER BY p.id').all();

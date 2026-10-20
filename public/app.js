@@ -570,6 +570,7 @@ async function loadClient(partial = false) {
   if (!partial || !$('#cSerp')) renderClient();
   renderPlan();
   loadMerged();
+  renderPlacements();
 }
 
 function renderClient() {
@@ -616,7 +617,9 @@ function renderClient() {
         <input id="cFilter" placeholder="Filter domains" value="${esc(state.filter)}"></div>
       <div class="tablewrap"><table id="cMerged"><thead></thead><tbody></tbody></table></div>
       <div id="cDetail" class="detail"></div>
-    </section>`;
+    </section>
+
+    <section class="card"><h2>4 · Placements and outcomes</h2><div id="cPlacements"></div></section>`;
 
   const hostInputs = () => {
     const urls = [...document.querySelectorAll('#cSerp input:checked')].map((b) => b.dataset.url);
@@ -860,7 +863,9 @@ async function loadAll() {
     </div>
     <div class="tablewrap"><table id="allTable"><thead></thead><tbody></tbody></table></div>
     <p class="muted">Targets beaten = targets it won at least one contest against, of the targets it met. Contests = the contests of the studies it appeared in; reach = wins ÷ those. A preset applies to every study.</p>
-    <div id="allDetail" class="detail"></div>`;
+    <div id="allDetail" class="detail"></div>
+    <section class="card" id="calibration" style="margin-top:16px"></section>`;
+  renderCalibration();
   $('#allScopes').onclick = (e) => {
     const b = e.target.closest('[data-scope]');
     if (!b) return;
@@ -951,4 +956,62 @@ function renderAllDetail(domain, scroll) {
     loadStudy();
   };
   if (scroll) $('#allDetail').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ---- placements & outcomes (item 7) ------------------------------------------------------
+const OUTCOME_LABEL = { 'beats-all': 'above every negative URL', 'beats-some': 'above some negative URLs', 'below-all': 'below every negative URL', 'not-ranking': `not in the top 30` };
+
+async function renderPlacements() {
+  const id = state.clientId;
+  const p = await api(`/api/clients/${id}/placements`).catch(() => null);
+  if (!p || id !== state.clientId || !$('#cPlacements')) return;
+  const last = p.checks[0];
+  $('#cPlacements').innerHTML = `
+    <p class="muted">Log what was published for ${esc(state.cdata.client.name)}, then press “Check now” from time to time: one live search for the name (about $0.005) records where each placement and each problem URL sits. Nothing runs on its own.</p>
+    <form id="cPlaceForm" class="row" style="align-items:flex-end;flex-wrap:wrap">
+      <label style="flex:3;min-width:220px">Placement URL <input name="url" placeholder="https://…" required></label>
+      <label style="flex:1;min-width:140px">Published <input name="publishedAt" type="date"></label>
+      <button type="submit" style="margin-bottom:8px">Add placement</button>
+    </form>
+    ${p.placements.length ? `<div class="tablewrap"><table><thead><tr><th>Placement</th><th class="num">Predicted</th><th>Published</th><th>History (oldest → newest)</th><th>Latest</th><th></th></tr></thead><tbody>
+      ${p.placements.map((x) => `<tr>
+        <td><a href="${href(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.domain)}</a><div class="u">${esc(x.url)}</div></td>
+        <td class="num" title="Merged weighted reach of the domain when it was added">${x.predicted_reach == null ? '–' : pct(x.predicted_reach)}</td>
+        <td>${esc(x.published_at ?? '–')}</td>
+        <td>${x.history.length ? x.history.map((h) => `<span class="tag" title="${esc(new Date(h.checkedAt).toLocaleString())}">${h.position ? `#${h.position}` : '–'}</span>`).join('') : '<span class="muted">not checked yet</span>'}</td>
+        <td>${x.latest ? `<span class="tag ${x.latest.outcome === 'beats-all' ? 'win' : x.latest.outcome === 'beats-some' ? '' : 'neg'}">${esc(OUTCOME_LABEL[x.latest.outcome])}</span> <span class="muted">${x.latest.beaten}/${x.latest.of}</span>` : ''}</td>
+        <td><button class="x" data-pdel="${x.id}" title="Remove placement">×</button></td></tr>`).join('')}
+    </tbody></table></div>` : '<p class="muted">No placements logged yet.</p>'}
+    ${last ? `<p class="muted">Last check ${esc(new Date(last.checkedAt).toLocaleString())}: problem URLs at ${last.negatives.map((n) => `${n.position ? `#${n.position}` : 'not in top 30'}`).join(', ') || 'none'}. ${p.checks.length} check${p.checks.length === 1 ? '' : 's'} so far.</p>` : ''}
+    <button class="ghost" id="cCheck">Check now (~$0.005)</button>`;
+  $('#cPlaceForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target));
+    await api(`/api/clients/${id}/placements`, { method: 'POST', body: JSON.stringify(body) }).catch((err) => alert(err.message));
+    renderPlacements();
+  };
+  $('#cPlacements').onclick = async (e) => {
+    const del = e.target.closest('[data-pdel]');
+    if (!del) return;
+    if (!confirm('Remove this placement and its position history?')) return;
+    await api(`/api/clients/${id}/placements?pid=${del.dataset.pdel}`, { method: 'DELETE' }).catch((err) => alert(err.message));
+    renderPlacements();
+  };
+  $('#cCheck').onclick = async () => {
+    if (!confirm(`Pull the live Google results for "${state.cdata.client.name}" and log where the placements and problem URLs sit? One DataForSEO call, about $0.005.`)) return;
+    await api(`/api/clients/${id}/check`, { method: 'POST' }).catch((err) => alert(err.message));
+    refreshStatus();
+    if (!polling) polling = setInterval(tick, 3000);
+  };
+}
+
+/** Calibration across every client, under the All studies table. */
+async function renderCalibration() {
+  const { rows } = await api('/api/calibration').catch(() => ({ rows: [] }));
+  if (!$('#calibration')) return;
+  $('#calibration').innerHTML = `<h2>Calibration: predicted vs observed</h2>
+    <p class="muted">Every checked placement: the merged weighted reach the tool gave its domain when it was added, against where it sat at its latest check. This is how to learn whether the scoring is right.</p>
+    ${rows.length ? `<div class="tablewrap"><table><thead><tr><th>Client</th><th>Domain</th><th class="num">Predicted</th><th class="num">Days live</th><th class="num">Checks</th><th class="num">Position</th><th>Outcome</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr><td>${esc(r.client)}</td><td><a href="${href(r.url)}" target="_blank" rel="noopener noreferrer">${esc(r.domain)}</a></td><td class="num">${r.predictedReach == null ? '–' : pct(r.predictedReach)}</td><td class="num">${r.daysLive ?? '–'}</td><td class="num">${r.checks}</td><td class="num">${r.position ? `#${r.position}` : '–'}</td><td>${esc(OUTCOME_LABEL[r.outcome])} <span class="muted">${r.beaten}/${r.of}</span></td></tr>`).join('')}
+    </tbody></table></div>` : '<p class="muted">No placements have been checked yet.</p>'}`;
 }

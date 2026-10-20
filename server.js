@@ -13,11 +13,12 @@ if (process.env.RENDER && !process.env.DB_PATH) {
 }
 installTrustStore((process.env.EXTRA_CA_CERTS || '').split(';').filter(Boolean));
 
-const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick, createClient, getClient, listClients, deleteClient, listTargets, setTargets, setClientVolume } = await import('./src/db.js');
+const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick, createClient, getClient, listClients, deleteClient, listTargets, setTargets, setClientVolume, deletePlacement } = await import('./src/db.js');
 const clients = await import('./src/client.js');
 const pages = await import('./src/pages.js');
 const decay = await import('./src/decay.js');
 const { allStudies } = await import('./src/allstudies.js');
+const placements = await import('./src/placements.js');
 const auth = await import('./src/auth.js');
 const { createStudy, fetchSerps, estimate, DEFAULTS } = await import('./src/run.js');
 const { scoreDomains, domainDetail, cleanProfile, PRESETS, VOLUME_BANDS } = await import('./src/score.js');
@@ -152,6 +153,7 @@ async function api(req, res, url) {
     return send(res, started ? 202 : 409, started ? { started: true } : { error: 'a job is already running' });
   }
 
+  if (route === 'GET /api/calibration') return send(res, 200, { rows: placements.calibration() });
   if (route === 'GET /api/all') {
     const scope = PRESETS[q.get('scope')] ? q.get('scope') : 'all';
     return send(res, 200, { scope, ...allStudies({ scope, minAppearances: Math.max(1, Number(q.get('min') || 1)), minTargets: Math.max(1, Number(q.get('minTargets') || 1)), load: studyData }) });
@@ -245,6 +247,37 @@ async function api(req, res, url) {
       const started = startJob('client', async (log) => {
         job.clientId = id;
         await clients.runClient(id, body.params ?? {}, log, { rerun: [].concat(body.rerun ?? []) });
+        log('Done.');
+      });
+      return started ? send(res, 202, { started: true }) : busy();
+    }
+    if (sub === '/placements') {
+      if (req.method === 'POST') {
+        const body = await readJson(req);
+        // Record the prediction at the time of placement: the domain's merged
+        // weighted reach under the client's situation profile.
+        let domain;
+        try {
+          domain = new URL(String(body.url)).hostname.replace(/^www\./, '');
+        } catch {
+          return send(res, 400, { error: 'Enter a full URL' });
+        }
+        const merged = clients.mergedForClient(id, studyData, { mode: 'profile' });
+        const hit = merged.domains.find((d) => d.domain === domain || domain.endsWith(`.${d.domain}`));
+        placements.addClientPlacement(id, { ...body, domain: hit?.domain ?? domain }, hit ? hit.merged : null);
+      } else if (req.method === 'DELETE') {
+        if (job.running && job.clientId === id) return busy();
+        deletePlacement(id, Number(q.get('pid')));
+      } else if (req.method !== 'GET') return send(res, 405, { error: 'method not allowed' });
+      return send(res, 200, placements.clientPlacements(id));
+    }
+    if (req.method === 'POST' && sub === '/check') {
+      const started = startJob('check', async (log) => {
+        job.clientId = id;
+        log(`Checking the live results for "${client.name}" (depth ${placements.CHECK_DEPTH})…`);
+        const { cost, rows } = await placements.checkNow(id);
+        const at = (k) => rows.filter((r) => r.kind === k).map((r) => (r.position ? `#${r.position}` : 'not in top ' + placements.CHECK_DEPTH)).join(', ') || 'none';
+        log(`Placements: ${at('placement')}. Negative URLs: ${at('negative')}. $${cost.toFixed(3)}`);
         log('Done.');
       });
       return started ? send(res, 202, { started: true }) : busy();

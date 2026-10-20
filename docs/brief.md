@@ -1,0 +1,42 @@
+outrank-map: improvement brief
+Context for whoever picks this up. Read README.md, src/score.js, src/classify.js, src/run.js and src/ahrefs.js first. Keep the current design: zero npm dependencies, Node 22 with node:sqlite, Ahrefs for keyword discovery, DataForSEO for live SERPs, budget caps before every paid call, resumable runs. Nothing below changes that.
+The tool today answers one question well: given a domain that carries negative coverage, which other domains regularly beat it on person-name searches. That is the right question, but the output is a leaderboard of domains, and the user still has to do the thinking that turns it into a plan for one client with one negative URL. The changes below, in priority order, close that gap. Each one is independent; do them in order and stop after any of them.
+1. Start from the client, not the domain
+Add a second entry point: client name (plus optional country and a list of one or more negative URLs). Pull the live SERP for the name at depth 30, show it, flag the negative results with negativeTitle(), and let the user confirm which URLs are the problem. Then run a study per hosting domain of those URLs (reuse createStudy and fetchSerps unchanged) and merge the leaderboards: a domain's merged score is its reach against the weakest of the negative hosts, with a column per host so the user can see where it fails. The point is that a client's name SERP typically has two to four negative hosts and the shortlist has to beat all of them.
+Also mark, in the merged leaderboard, which candidate domains already appear in the client's own name SERP and at what position. Those are properties to strengthen, which is cheaper than a new placement, and they should sort above new placements at equal score.
+Schema: a clients table (name, country, created_at), a client_targets table (client_id, url, domain, position_seen, study_id), and client_id nullable on studies. Keep the existing single-domain flow working.
+2. Weight contests by similarity to the client's situation
+Scopes (all / negative / article) are too coarse. Replace them with a situation profile taken from step 1, or entered by hand in the single-domain flow: the negative page's type (article, profile, forum post), its live position, the keyword's volume band, and the negative category (see 3). Keep the three scopes as presets of the profile so nothing is lost.
+In scoreDomains, add a weighted reach alongside reach: each contest gets a weight 0 to 1 from how closely it matches the profile (same page type 0.4, target position within plus or minus 3 of the client's 0.3, volume within the same band 0.2, same negative category 0.1; tune later). Show both numbers; sort by weighted reach by default. Record the weights per contest in the drill-down so the user can see why a contest counted for little.
+3. Split the negative lexicon into categories
+NEGATIVE in classify.js is one flat list. Group it: legal-criminal (indicted, arrested, sentenced, fraud), civil-litigation (lawsuit, sued, settlement, dispute), financial-distress (foreclosure, bankrupt, lien, owes), regulatory (fined, barred, revoked, SEC, FINRA), conduct (harassment, misconduct, scandal, fired), reputation-opinion (worst, slumlord, troubled). negativeTitle() returns the matched word and its category. The category feeds step 2 and gives a per-category breakdown in the summary, which is directly useful when talking to a client whose problem is a lawsuit versus a regulatory fine.
+4. Explain why the winning pages win
+The leaderboard says a domain wins; it does not say whether the win comes from the domain or the page. For the shortlisted (starred) domains only, to keep cost down:
+
+* Pull Ahrefs page-level metrics for each winning URL in the drill-down: URL rating, referring domains to the page, first-seen date. Pull the same for the target's page in each contest. One Ahrefs call per URL via site-explorer/metrics or backlinks-stats; budget-check first as personKeywords does.
+* Compute per domain: share of wins where the winning page has zero referring domains (wins on domain authority alone), median page age at win, and share of wins where the person's name is in the title and in the URL slug.
+* Show this on the domain card as plain sentences: "Wins 71% of the time with pages that have no external links, median page age 14 months, name in the title 92% of the time."
+
+That tells the user whether a placement on the domain will rank without a link campaign, and what the page has to look like. Store it in a page_metrics table keyed by URL so re-runs do not re-pay.
+5. Show how the target decays on its own
+For a negative news URL the first question is whether it will fade without intervention. For the contests in scope, pull DataForSEO Labs historical SERPs (dataforseo_labs/google/historical_serps/live) for a sample of 30 keywords, highest volume first, and chart the target's median position by month over the last 12 months. Add one number to the summary: median position change over the last 6 months for the target on these searches. Store it per study. Cap the spend the same way fetchSerps does.
+6. Aggregate across every study ever run
+Add a cross-study view: for every domain that appears in any study, its total wins, total contests, reach, number of targets beaten, and the list of targets. Over time this becomes the user's own ranking of placement domains by their power to beat news sites on person searches, which is the main asset this tool can produce and which no vendor sells. One query over the existing tables; no new API spend. Put it behind an "All studies" tab with the same columns as the leaderboard plus "targets beaten".
+7. Record what was done and whether it worked
+Add a placements table: client_id, domain, url, published_at, keyword (the client's name), and a position log (date, position) filled by a manual "check now" button that pulls the live SERP for the client's name and records where the placement and each negative URL sit. Nothing automatic; one button, one SERP call. After a few months this gives a calibration set: predicted weighted reach versus observed outcome, shown as a single table. This is the only way to find out whether the scoring is right, and it is the feature that makes the tool better with use rather than static.
+8. Report rewrite
+The Report page should read as a plan, not a data dump, in this order: the client's name SERP with the negative URLs marked; the decay figure from step 5; the shortlist, each domain with weighted reach, the sentence from step 4, the winning section and page type, and the user's note; existing properties to strengthen (step 1) listed separately from new placements. Keep it under three printed pages. No charts beyond the decay line.
+Smaller fixes
+
+* LOCATION_CODES covers eight countries. Load the full list from DataForSEO serp/google/locations once, cache to data/locations.json, and accept any ISO code.
+* pageType() returns 'other' for most corporate pages. Add 'homepage' (path is / or empty) and 'court' (hosts matching courtlistener, pacermonitor, unicourt, trellis, justia, casetext, law360, and paths containing /case/ or /docket/), since court records are a distinct competitor class in name SERPs.
+* accessTag(): add 'court / public record' for the hosts above and 'news' for domains whose winning page types are mostly 'article' (computed, not listed), so untagged no longer means earned media by default.
+* Ahrefs returns best_position, which may be stale. Record the delta between ahrefs_position and the live position per keyword and show the median drift in the summary, so the user knows how fresh the Ahrefs side is.
+* The SERP fetch is desktop only. Add a device parameter to the study (default desktop) and store it in params; do not mix devices within a study.
+* Tests exist for auth, ahrefs and score. Add tests for classify.js (negativeTitle categories, pageType for the new classes) and for the weighted reach in step 2 with a fixed fixture of five contests.
+
+What not to do
+
+* Do not add an LLM call anywhere in the scoring path. The value of the tool is that every number is traceable to a SERP row.
+* Do not add a dependency for charts; the existing SVG approach in public/app.js is fine for one line chart.
+* Do not try to predict a single page's ranking for the client's name. The tool infers from analogous searches and the README says so; keep that honesty in the UI copy.

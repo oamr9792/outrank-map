@@ -17,7 +17,7 @@ export const NAME_SERP_DEPTH = 30;
 export async function fetchNameSerp(clientId) {
   const c = getClient(clientId);
   if (!c) throw new Error('No such client');
-  const locationCode = dfs.LOCATION_CODES[c.country];
+  const locationCode = dfs.locationCode(c.country);
   if (!locationCode) throw new Error(`No location code for country "${c.country}"`);
   dfs.resetSpend();
   const { cost, results } = await dfs.serp(c.name, { depth: NAME_SERP_DEPTH, locationCode });
@@ -41,7 +41,7 @@ function studyComplete(studyId) {
  * finished study of the same domain and country, resume an unfinished one,
  * or run a new one. Hosts named in `rerun` always get a new study.
  */
-export function planHosts(clientId, { rerun = [] } = {}) {
+export function planHosts(clientId, { rerun = [], device = 'desktop' } = {}) {
   const c = getClient(clientId);
   const byDomain = new Map();
   for (const t of listTargets(clientId)) {
@@ -53,17 +53,17 @@ export function planHosts(clientId, { rerun = [] } = {}) {
   return [...byDomain.values()].map((h) => {
     if (rerun.includes(h.domain)) return { ...h, action: 'new', studyId: null };
     if (h.linked) return { ...h, action: studyComplete(h.linked) ? 'linked' : 'resume', studyId: h.linked };
-    const reuse = findReusableStudy(h.domain, c.country);
+    const reuse = findReusableStudy(h.domain, c.country, device);
     return reuse ? { ...h, action: 'reuse', studyId: reuse } : { ...h, action: 'new', studyId: null };
-  });
+  }).map((h) => ({ ...h, device: h.studyId ? getStudy(h.studyId).params.device ?? 'desktop' : device }));
 }
 
-export function estimateClient(clientId, params, opts) {
-  const plan = planHosts(clientId, opts);
+export function estimateClient(clientId, params, opts = {}) {
+  const plan = planHosts(clientId, { ...opts, device: params.device || 'desktop' });
   const fresh = plan.filter((h) => h.action === 'new').length;
   const one = estimate(params);
   return {
-    plan: plan.map(({ domain, action, studyId }) => ({ domain, action, studyId })),
+    plan: plan.map(({ domain, action, studyId, device }) => ({ domain, action, studyId, device })),
     newStudies: fresh,
     ahrefsUnits: fresh * one.ahrefsUnits,
     dataforseoUsd: +(fresh * one.dataforseoUsd).toFixed(2),
@@ -75,7 +75,7 @@ export function estimateClient(clientId, params, opts) {
 export async function runClient(clientId, params, log, opts = {}) {
   const c = getClient(clientId);
   if (!c) throw new Error('No such client');
-  const plan = planHosts(clientId, opts);
+  const plan = planHosts(clientId, { ...opts, device: params.device || 'desktop' });
   if (!plan.length) throw new Error('Confirm at least one negative URL first');
   for (const h of plan) {
     if (h.action === 'linked') {
@@ -103,7 +103,7 @@ export async function fetchNameVolume(clientId) {
   const c = getClient(clientId);
   if (!c) throw new Error('No such client');
   dfs.resetSpend();
-  const { cost, volume } = await dfs.searchVolume(c.name, { locationCode: dfs.LOCATION_CODES[c.country] });
+  const { cost, volume } = await dfs.searchVolume(c.name, { locationCode: dfs.locationCode(c.country) });
   setClientVolume(clientId, { volume, band: bandOf(volume ?? 0), cost });
   return { cost, volume };
 }

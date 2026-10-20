@@ -126,8 +126,19 @@ headline" in a profile. The study summary counts contests per category, and
 the profile can weight by one.
 
 Access tags (self-publish, profile/directory, press release, reference,
-community) are a fixed list in `src/classify.js`; untagged domains are
-earned media or unknown.
+community, court / public record) are a fixed list in `src/classify.js`;
+an unlisted domain whose winning pages are mostly articles is tagged *news*,
+so untagged now means unknown. Page types include *court* (CourtListener,
+PacerMonitor, UniCourt, Trellis, Justia, Casetext, Law360, and /case/ or
+/docket/ paths) and *homepage*.
+
+**Countries and devices.** Any ISO country code works: the full list comes
+from DataForSEO's free locations endpoint at startup and is cached in
+`data/locations.json` (the built-in eight are the fallback). Each study has
+one device, desktop (default) or mobile, stored in its params; a client
+run only reuses a study of the same device. The study summary shows the
+median drift between Ahrefs' position and the live one, as a measure of how
+fresh the Ahrefs side is.
 
 ## Run
 

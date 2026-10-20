@@ -59,7 +59,7 @@ export async function checkNow(clientId) {
   const targets = listTargets(clientId);
   if (!placements.length && !targets.length) throw new Error('Add a placement or a problem URL first');
   dfs.resetSpend();
-  const { cost, results } = await dfs.serp(c.name, { depth: CHECK_DEPTH, locationCode: dfs.LOCATION_CODES[c.country] });
+  const { cost, results } = await dfs.serp(c.name, { depth: CHECK_DEPTH, locationCode: dfs.locationCode(c.country) });
   const rows = checkRows(placements, targets, results);
   const id = saveCheck(clientId, c.name, rows, cost);
   return { id, cost, rows };

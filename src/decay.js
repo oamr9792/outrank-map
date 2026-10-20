@@ -114,7 +114,7 @@ export async function runDecay(studyId, log, { profile, n = DEFAULT_SAMPLE } = {
   const sample = sampleKeywords(loadStudyData(studyId), study.target, profile ?? study.profile, n);
   if (!sample.length) throw new Error('No contests in scope to follow');
   dfs.resetSpend();
-  const locationCode = dfs.LOCATION_CODES[study.country];
+  const locationCode = dfs.locationCode(study.country);
   log(`Pulling 12 months of history for ${sample.length} searches (~$${(sample.length * dfs.USD_PER_HISTORY_KEYWORD).toFixed(3)}, cap $${dfs.budget()})…`);
   let i = 0, ok = 0, bad = 0, stop = null;
   async function worker() {

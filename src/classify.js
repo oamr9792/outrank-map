@@ -54,6 +54,10 @@ export function negativeTitle(title = '') {
   return generic;
 }
 
+/** Court records and docket sites: a distinct competitor class in name SERPs. */
+const COURT_HOST = /(^|\.)(courtlistener\.com|pacermonitor\.com|unicourt\.com|trellis\.law|justia\.com|casetext\.com|law360\.com)$/;
+const COURT_PATH = /\/(case|cases|docket|dockets)(\/|$)/;
+
 /** What kind of page a URL is, from its host and path alone. */
 export function pageType(url) {
   let u;
@@ -64,6 +68,8 @@ export function pageType(url) {
   }
   const host = u.hostname.replace(/^www\./, '');
   const p = u.pathname.toLowerCase();
+  if (COURT_HOST.test(host) || COURT_PATH.test(p)) return 'court';
+  if (p === '' || p === '/') return 'homepage';
   if (/(^|\.)(youtube\.com|youtu\.be|vimeo\.com)$/.test(host) || /\/video(s)?\//.test(p)) return 'video';
   if (/(^|\.)(x\.com|twitter\.com|facebook\.com|instagram\.com|tiktok\.com|threads\.net)$/.test(host)) return 'social';
   if (/(^|\.)(wikipedia\.org|wikidata\.org)$/.test(host)) return 'wiki';
@@ -88,8 +94,18 @@ const ACCESS = [
   ['press release', /(^|\.)(prnewswire\.com|businesswire\.com|globenewswire\.com|accesswire\.com|einpresswire\.com|newswire\.com|prweb\.com)$/],
 ];
 
-export function accessTag(domain) {
+/**
+ * `types` (the domain's winning page types, as counts) lets an unlisted
+ * domain whose wins are mostly articles be tagged 'news', so untagged no
+ * longer reads as earned media by default.
+ */
+export function accessTag(domain, types = null) {
+  if (COURT_HOST.test(domain)) return 'court / public record';
   for (const [tag, re] of ACCESS) if (re.test(domain)) return tag;
+  if (types) {
+    const total = Object.values(types).reduce((a, n) => a + n, 0);
+    if (total && (types.article ?? 0) / total > 0.5) return 'news';
+  }
   return null;
 }
 

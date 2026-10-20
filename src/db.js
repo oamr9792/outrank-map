@@ -249,6 +249,7 @@ export function loadStudyData(studyId) {
     people: JSON.parse(k.people),
     orgs: JSON.parse(k.orgs),
     volume: k.volume,
+    ahrefsPosition: k.ahrefs_position,
     serpAt: k.serp_at,
     results: byKw.get(k.id) ?? [],
   }));
@@ -307,20 +308,20 @@ export const linkTargetStudy = (clientId, domain, studyId) =>
   openDb().prepare('UPDATE client_targets SET study_id = ? WHERE client_id = ? AND domain = ?').run(studyId, clientId, domain);
 
 /**
- * The newest study of a domain in a country with every keyword fetched (or
- * given up on) and at least one keyword: safe to reuse for another client.
+ * The newest study of a domain, country and device with every keyword
+ * fetched (or given up on) and at least one keyword: safe to reuse for
+ * another client. Studies from before devices existed are desktop.
  */
-export function findReusableStudy(domain, country) {
-  return (
-    openDb()
-      .prepare(
-        `SELECT s.id FROM studies s JOIN keywords k ON k.study_id = s.id
-         WHERE s.target = ? AND s.country = ?
-         GROUP BY s.id HAVING COUNT(k.id) > 0 AND SUM(k.serp_at IS NULL AND k.serp_error IS NULL) = 0
-         ORDER BY s.id DESC LIMIT 1`,
-      )
-      .get(domain, country)?.id ?? null
-  );
+export function findReusableStudy(domain, country, device = 'desktop') {
+  const rows = openDb()
+    .prepare(
+      `SELECT s.id, s.params FROM studies s JOIN keywords k ON k.study_id = s.id
+       WHERE s.target = ? AND s.country = ?
+       GROUP BY s.id HAVING COUNT(k.id) > 0 AND SUM(k.serp_at IS NULL AND k.serp_error IS NULL) = 0
+       ORDER BY s.id DESC`,
+    )
+    .all(domain, country);
+  return rows.find((r) => (JSON.parse(r.params).device ?? 'desktop') === device)?.id ?? null;
 }
 
 /** volume: a fetched figure or null; band: an index into VOLUME_BANDS or null. */

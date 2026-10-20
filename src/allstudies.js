@@ -65,7 +65,7 @@ export function aggregate(scored, { minAppearances = 1, minTargets = 1 } = {}) {
       top3Wins: a.top3Wins,
       volumeWon: a.volumeWon,
       types: a.types,
-      access: accessTag(a.domain),
+      access: accessTag(a.domain, a.types),
       targetsMet: a.targets.length,
       targetsBeaten: a.targets.filter((t) => t.wins > 0).length,
       targets: a.targets.sort((x, y) => y.reach - x.reach),

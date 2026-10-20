@@ -4,6 +4,9 @@
  * Every call's cost is added to a per-run tally checked against
  * DATAFORSEO_MAX_USD before the next call goes out.
  */
+import fs from 'node:fs';
+import path from 'node:path';
+
 const BASE = 'https://api.dataforseo.com/v3';
 const TIMEOUT_MS = 90000;
 
@@ -64,13 +67,14 @@ async function post(pathname, task) {
  * organic rank (rank_group), so SERP features above do not shift it — the
  * same basis Ahrefs' best_position uses.
  */
-export async function serp(keyword, { depth = 20, locationCode = 2840, languageCode = 'en' } = {}) {
+export const DEVICES = ['desktop', 'mobile'];
+export async function serp(keyword, { depth = 20, locationCode = 2840, languageCode = 'en', device = 'desktop' } = {}) {
   const { task, cost } = await post('/serp/google/organic/live/advanced', {
     keyword,
     depth,
     location_code: locationCode,
     language_code: languageCode,
-    device: 'desktop',
+    device: DEVICES.includes(device) ? device : 'desktop',
   });
   const results = [];
   for (const item of task.result?.[0]?.items ?? []) {
@@ -93,8 +97,47 @@ export function hostOf(url) {
   }
 }
 
-/** Google Ads location codes for the countries this tool is likely to see. */
+/**
+ * Country location codes. The built-in eight are a fallback; at startup the
+ * full list is loaded from DataForSEO's free serp/google/locations endpoint
+ * and cached in data/locations.json, so any ISO country code works.
+ */
 export const LOCATION_CODES = { us: 2840, gb: 2826, ca: 2124, au: 2036, ie: 2372, il: 2376, de: 2276, fr: 2250 };
+let locations = { ...LOCATION_CODES };
+export const locationCode = (iso) => locations[String(iso ?? '').toLowerCase()] ?? null;
+export const knownCountries = () => Object.keys(locations).sort();
+
+/** Pure: { iso: location_code } for the country-level entries of the list. */
+export function parseLocations(items = []) {
+  const out = {};
+  for (const l of items) if (l?.location_type === 'Country' && l.country_iso_code && l.location_code) out[l.country_iso_code.toLowerCase()] = l.location_code;
+  return out;
+}
+
+/**
+ * Loads the cached list, or fetches and caches it (free). Never fatal: on
+ * any failure the built-in eight stay in use and the reason is returned.
+ */
+export async function loadLocations(cacheFile) {
+  try {
+    if (fs.existsSync(cacheFile)) {
+      locations = { ...LOCATION_CODES, ...JSON.parse(fs.readFileSync(cacheFile, 'utf8')) };
+      return { source: 'cache', countries: Object.keys(locations).length };
+    }
+    if (!hasCredentials()) return { source: 'built-in', countries: Object.keys(locations).length, reason: 'no DataForSEO credentials' };
+    const auth = 'Basic ' + Buffer.from(`${process.env.DATAFORSEO_LOGIN}:${process.env.DATAFORSEO_PASSWORD}`).toString('base64');
+    const res = await fetch(`${BASE}/serp/google/locations`, { headers: { Authorization: auth }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    const body = await res.json();
+    const parsed = parseLocations(body?.tasks?.[0]?.result ?? []);
+    if (Object.keys(parsed).length < 50) throw new Error(`only ${Object.keys(parsed).length} countries returned`);
+    fs.mkdirSync(path.dirname(cacheFile), { recursive: true });
+    fs.writeFileSync(cacheFile, JSON.stringify(parsed));
+    locations = { ...LOCATION_CODES, ...parsed };
+    return { source: 'fetched', countries: Object.keys(locations).length };
+  } catch (err) {
+    return { source: 'built-in', countries: Object.keys(locations).length, reason: err.message };
+  }
+}
 
 /**
  * Google Ads monthly search volume for one keyword. Billed per task (one

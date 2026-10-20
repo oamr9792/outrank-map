@@ -73,7 +73,7 @@ const COLS = [
 
 // ---- situation profile ---------------------------------------------------------
 const VOLUME_LABELS = ['<100', '100–1k', '1k–10k', '10k+'];
-const PAGE_TYPES = ['article', 'profile', 'forum', 'social', 'video', 'wiki', 'other'];
+const PAGE_TYPES = ['article', 'profile', 'court', 'homepage', 'forum', 'social', 'video', 'wiki', 'other'];
 const PART_LABEL = { pageType: 'page type', position: 'position ±3', volumeBand: 'volume band', category: 'negative category' };
 
 function profileLabel(p = {}) {
@@ -260,7 +260,7 @@ function renderStudy() {
   $('#view').innerHTML = `
     <div class="head">
       <input id="studyName" class="title-input" value="${esc(study.name || '')}" placeholder="${esc(study.target)} — name this study">
-      <div class="muted">${esc(study.target)} · ${esc(study.country.toUpperCase())} · ${wordsLabel(p)} person keywords · target pos ≤ ${p.maxPosition}${p.minVolume ? ` · vol ≥ ${p.minVolume}` : ''}${p.maxVolume ? ` · vol ≤ ${p.maxVolume}` : ''} · ${num(study.ahrefs_units)} Ahrefs units · $${study.dfs_cost.toFixed(2)} DataForSEO</div></div>
+      <div class="muted">${esc(study.target)} · ${esc(study.country.toUpperCase())} · ${wordsLabel(p)} person keywords · ${esc(p.device ?? 'desktop')} · target pos ≤ ${p.maxPosition}${p.minVolume ? ` · vol ≥ ${p.minVolume}` : ''}${p.maxVolume ? ` · vol ≤ ${p.maxVolume}` : ''} · ${num(study.ahrefs_units)} Ahrefs units · $${study.dfs_cost.toFixed(2)} DataForSEO</div></div>
     <textarea id="studyNotes" rows="2" placeholder="Notes on this study (saved automatically)">${esc(study.notes || '')}</textarea>
     <div class="stats">
       <div class="stat"><b>${num(summary.contests)}</b><span>contests<br>(target in live top ${p.depth})</span></div>
@@ -269,6 +269,7 @@ function renderStudy() {
       <div class="stat"><b>${num(summary.targetTop3)}</b><span>target in top 3</span></div>
       <div class="stat"><b>${num(summary.negativeContests)}</b><span>target page reads negative${Object.keys(summary.categories ?? {}).length ? `<br>${Object.entries(summary.categories).sort((a, b) => b[1] - a[1]).map(([c, n]) => `${esc(c)} ${n}`).join(' · ')}` : ''}</span></div>
       <div class="stat"><b>${num(summary.targetAbsent)}</b><span>of ${num(summary.keywords)} SERPs: target gone since Ahrefs saw it</span></div>
+      <div class="stat" title="Live position minus the position Ahrefs reported, over contests. Positive = the target has slipped since Ahrefs looked."><b>${summary.medianDrift == null ? '–' : `${summary.medianDrift > 0 ? '+' : ''}${summary.medianDrift}`}</b><span>median drift, Ahrefs → live<br>${summary.driftKeywords ? `${summary.driftOver3} of ${summary.driftKeywords} moved more than 3` : ''}</span></div>
     </div>
     <section class="card" id="decayCard"></section>
     <section class="card profile">
@@ -709,7 +710,8 @@ function runForm() {
       <label>Keywords per host <input name="limit" type="number" min="1" max="10000" value="${d.limit ?? 300}"></label>
       <label>Min words <input name="minWords" type="number" min="0" max="10" value="${d.minWords ?? 2}"></label>
       <label>Max words <input name="maxWords" type="number" min="0" max="10" value="${d.maxWords ?? 2}"></label>
-      <label>Target pos ≤ <input name="maxPosition" type="number" min="1" max="100" value="${d.maxPosition ?? 20}"></label></div>`;
+      <label>Target pos ≤ <input name="maxPosition" type="number" min="1" max="100" value="${d.maxPosition ?? 20}"></label>
+      <label>Device <select name="device"><option>desktop</option><option>mobile</option></select></label></div>`;
 }
 
 async function renderPlan() {
@@ -721,7 +723,7 @@ async function renderPlan() {
     ${plan
       .map(
         (h) => `<tr><td>${esc(h.domain)}</td><td class="num">${h.urls.length}</td>
-        <td>${esc(ACTION_LABEL[h.action] ?? h.action)}${h.studyId ? ` · <a href="#" data-open-study="${h.studyId}">study #${h.studyId}</a>` : ''}</td>
+        <td>${esc(ACTION_LABEL[h.action] ?? h.action)}${h.studyId ? ` · <a href="#" data-open-study="${h.studyId}">study #${h.studyId}</a> (${esc(h.device)})` : ''}</td>
         <td>${h.action === 'new' && !state.rerun.has(h.domain) ? '' : `<input type="checkbox" data-rerun="${esc(h.domain)}" ${state.rerun.has(h.domain) ? 'checked' : ''}>`}</td></tr>`,
       )
       .join('')}</tbody></table>
@@ -732,7 +734,7 @@ async function renderPlan() {
   const params = () => Object.fromEntries(new FormData($('#cRunForm')));
   const est = async () => {
     const p = params();
-    const e = await api(`/api/clients/${state.clientId}/estimate?limit=${encodeURIComponent(p.limit)}&maxPosition=${encodeURIComponent(p.maxPosition)}&rerun=${encodeURIComponent([...state.rerun].join(','))}`).catch(() => null);
+    const e = await api(`/api/clients/${state.clientId}/estimate?limit=${encodeURIComponent(p.limit)}&maxPosition=${encodeURIComponent(p.maxPosition)}&device=${encodeURIComponent(p.device || 'desktop')}&rerun=${encodeURIComponent([...state.rerun].join(','))}`).catch(() => null);
     if (e) $('#cEstimate').textContent = e.newStudies ? `${e.newStudies} new stud${e.newStudies === 1 ? 'y' : 'ies'}: up to ${num(e.ahrefsUnits)} Ahrefs units · ~$${e.dataforseoUsd} DataForSEO · ~${e.serpMinutes} min` : 'No new studies needed: nothing to pay for.';
   };
   est();

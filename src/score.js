@@ -152,11 +152,17 @@ export function scoreDomains(keywords, target, { profile = {}, minAppearances = 
       volumeWon: a.volumeWon,
       types: a.types,
       sections: Object.entries(a.sections).sort((x, y) => y[1] - x[1]).slice(0, 4),
-      access: accessTag(a.domain),
+      access: accessTag(a.domain, a.types),
     }))
     .sort((x, y) => y.weightedReach - x.weightedReach || y.wins - x.wins || y.winRate - x.winRate || y.volumeWon - x.volumeWon);
 
   const positions = set.map((k) => k.target.position);
+  // How fresh the Ahrefs side is: live position minus the position Ahrefs
+  // reported, per contest. Positive = the target has slipped since.
+  const drifts = set.filter((k) => k.ahrefsPosition != null).map((k) => k.target.position - k.ahrefsPosition);
+  const sorted = [...drifts].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  const medianDrift = sorted.length ? (sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2) : null;
   return {
     summary: {
       keywords: keywords.length,
@@ -167,6 +173,9 @@ export function scoreDomains(keywords, target, { profile = {}, minAppearances = 
       targetAvgPosition: n ? positions.reduce((a, b) => a + b, 0) / n : null,
       targetTop3: positions.filter((p) => p <= 3).length,
       negativeContests: set.filter((k) => k.target.negative).length,
+      medianDrift,
+      driftKeywords: drifts.length,
+      driftOver3: drifts.filter((x) => Math.abs(x) > 3).length,
       // Contests per negative category of the target's headline.
       categories: set.reduce((acc, k) => {
         const c = categoryOf(k.target.negative);

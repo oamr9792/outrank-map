@@ -28,6 +28,8 @@ const { NEGATIVE_CATEGORIES } = await import('./src/classify.js');
 const dfs = await import('./src/dataforseo.js');
 
 openDb();
+const loc = await dfs.loadLocations(path.join(ROOT, 'data', 'locations.json'));
+console.log(`Countries: ${loc.countries} (${loc.source}${loc.reason ? `: ${loc.reason}` : ''})`);
 
 const PORT = Number(process.env.PORT || 8801);
 // Render (which sets RENDER=true) routes to the container from outside, so a
@@ -183,7 +185,7 @@ async function api(req, res, url) {
     if (job.running) return busy();
     const body = await readJson(req);
     const country = String(body.country || 'us').toLowerCase();
-    if (!dfs.LOCATION_CODES[country]) return send(res, 400, { error: `No location code for country "${country}"` });
+    if (!dfs.locationCode(country)) return send(res, 400, { error: `No location code for country "${country}"` });
     const urls = [].concat(body.urls ?? []).map((u) => String(u).trim()).filter((u) => /^https?:\/\//i.test(u));
     const id = createClient({ name: body.name, country });
     nameSerpJob(id, urls);
@@ -241,7 +243,7 @@ async function api(req, res, url) {
       return send(res, 200, { targets: listTargets(id), plan: clients.planHosts(id) });
     }
     if (req.method === 'GET' && sub === '/estimate') {
-      return send(res, 200, clients.estimateClient(id, { limit: q.get('limit'), maxPosition: q.get('maxPosition') }, { rerun }));
+      return send(res, 200, clients.estimateClient(id, { limit: q.get('limit'), maxPosition: q.get('maxPosition'), device: q.get('device') || 'desktop' }, { rerun }));
     }
     if (req.method === 'POST' && sub === '/run') {
       const body = await readJson(req);

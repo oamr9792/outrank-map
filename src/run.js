@@ -2,7 +2,7 @@ import { openDb, tx, normalizeDomain, getStudy } from './db.js';
 import * as ahrefs from './ahrefs.js';
 import * as dfs from './dataforseo.js';
 
-export const DEFAULTS = { country: 'us', limit: 300, minWords: 2, maxWords: 2, maxPosition: 20, minVolume: 0, maxVolume: 0, depth: 30 };
+export const DEFAULTS = { country: 'us', limit: 300, minWords: 2, maxWords: 2, maxPosition: 20, minVolume: 0, maxVolume: 0, depth: 30, device: 'desktop' };
 
 export function wordsLabel(p) {
   // Studies saved before the range existed carry a single `words`.
@@ -31,13 +31,18 @@ function cleanParams(input) {
   const p = { ...DEFAULTS };
   for (const k of ['limit', 'minWords', 'maxWords', 'maxPosition', 'minVolume', 'maxVolume']) if (input[k] !== undefined && input[k] !== '') p[k] = Math.max(0, Math.floor(Number(input[k]) || 0));
   if (input.country) p.country = String(input.country).toLowerCase().slice(0, 2);
+  // One device per study: a study's SERPs are never mixed.
+  if (input.device) {
+    if (!dfs.DEVICES.includes(input.device)) throw new Error(`Device must be one of ${dfs.DEVICES.join(', ')}`);
+    p.device = input.device;
+  }
   p.limit = Math.min(Math.max(p.limit, 1), 10000);
   // 0 means no bound on that side; a reversed range is read the right way round.
   if (p.minWords && p.maxWords && p.minWords > p.maxWords) [p.minWords, p.maxWords] = [p.maxWords, p.minWords];
   p.maxPosition = Math.min(Math.max(p.maxPosition || 20, 1), 100);
   // Fetch deep enough to see the target wherever Ahrefs last saw it, plus slack.
   p.depth = depthFor(p.maxPosition);
-  if (!dfs.LOCATION_CODES[p.country]) throw new Error(`No location code for country "${p.country}"`);
+  if (!dfs.locationCode(p.country)) throw new Error(`No location code for country "${p.country}"`);
   return p;
 }
 
@@ -79,7 +84,7 @@ export async function fetchSerps(studyId, log, { retryFailed = false } = {}) {
   if (!pending.length) return log('Nothing to fetch: every keyword has its SERP.');
   dfs.resetSpend();
   const concurrency = Math.max(1, Number(process.env.SERP_CONCURRENCY || 8));
-  log(`Fetching ${pending.length} live SERPs (depth ${study.params.depth}, ${concurrency} at a time, ~$${(pending.length * dfs.usdPerSerp(study.params.depth)).toFixed(2)}, cap $${dfs.budget()})…`);
+  log(`Fetching ${pending.length} live ${study.params.device ?? 'desktop'} SERPs (depth ${study.params.depth}, ${concurrency} at a time, ~$${(pending.length * dfs.usdPerSerp(study.params.depth)).toFixed(2)}, cap $${dfs.budget()})…`);
 
   const save = d.prepare('INSERT OR REPLACE INTO results (keyword_id, position, url, domain, title) VALUES (?, ?, ?, ?, ?)');
   const done = d.prepare('UPDATE keywords SET serp_at = ?, serp_error = NULL WHERE id = ?');
@@ -91,7 +96,7 @@ export async function fetchSerps(studyId, log, { retryFailed = false } = {}) {
     while (!stop && i < pending.length) {
       const k = pending[i++];
       try {
-        const { cost, results } = await dfs.serp(k.keyword, { depth: study.params.depth, locationCode: dfs.LOCATION_CODES[study.country] });
+        const { cost, results } = await dfs.serp(k.keyword, { depth: study.params.depth, locationCode: dfs.locationCode(study.country), device: study.params.device ?? 'desktop' });
         tx(() => {
           d.prepare('DELETE FROM results WHERE keyword_id = ?').run(k.id);
           for (const r of results) save.run(k.id, r.position, r.url, r.domain, r.title);

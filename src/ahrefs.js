@@ -40,6 +40,9 @@ export async function unitsLeft() {
  * @param o.maxPosition only keywords where the target ranks at or above this
  * @param o.minVolume / o.maxVolume  volume band; the cap trims celebrities
  */
+/** Most rows Ahrefs returns for one request, whatever the limit. */
+export const PAGE_SIZE = 100;
+
 export async function personKeywords(target, { country = 'us', limit = 500, minWords = 2, maxWords = 2, maxPosition = 20, minVolume = 0, maxVolume = 0 } = {}) {
   const and = [
     { not: { field: 'person_entities', is: 'empty' } },
@@ -54,17 +57,34 @@ export async function personKeywords(target, { country = 'us', limit = 500, minW
   if (minVolume) and.push({ field: 'volume', is: ['gte', minVolume] });
   if (maxVolume) and.push({ field: 'volume', is: ['lte', maxVolume] });
 
-  const body = await get('/site-explorer/organic-keywords', {
-    target,
-    mode: 'subdomains',
-    country,
-    date: new Date().toISOString().slice(0, 10),
-    select: 'keyword,entities,best_position,best_position_url,volume',
-    where: JSON.stringify({ and }),
-    order_by: 'volume:desc',
-    limit,
-  });
-  return (body.keywords ?? []).map((k) => ({
+  // Ahrefs returns at most PAGE_SIZE rows per request whatever `limit` says
+  // (checked October 2026: limit 150 gave 100). Page with a keyset cursor on
+  // (volume desc, keyword asc): each request asks for rows after the last one.
+  const rows = [];
+  let cursor = null;
+  while (rows.length < limit) {
+    const where = cursor
+      ? { and: [...and, { or: [{ field: 'volume', is: ['lt', cursor.volume] }, { and: [{ field: 'volume', is: ['eq', cursor.volume] }, { field: 'keyword', is: ['gt', cursor.keyword] }] }] }] }
+      : { and };
+    const want = Math.min(PAGE_SIZE, limit - rows.length);
+    const body = await get('/site-explorer/organic-keywords', {
+      target,
+      mode: 'subdomains',
+      country,
+      date: new Date().toISOString().slice(0, 10),
+      select: 'keyword,entities,best_position,best_position_url,volume',
+      where: JSON.stringify(where),
+      order_by: 'volume:desc,keyword:asc',
+      limit: want,
+    });
+    const page = body.keywords ?? [];
+    rows.push(...page);
+    const last = page.at(-1);
+    // A short page is the end; so is a row with no volume to page past.
+    if (page.length < want || !last || last.volume == null) break;
+    cursor = { volume: last.volume, keyword: last.keyword };
+  }
+  return rows.map((k) => ({
     keyword: k.keyword,
     people: (k.entities ?? []).filter((e) => e.category === 'Person').map((e) => e.name),
     orgs: (k.entities ?? []).filter((e) => e.category === 'Organization').map((e) => e.name),

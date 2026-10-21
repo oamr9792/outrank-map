@@ -212,16 +212,19 @@ export function cleanTriggerInput(input) {
   const limit = Math.min(Math.max(Math.floor(Number(input.limit) || 150), 20), 2000);
   // Aggregator people are mostly not famous; cap both sides alike.
   const maxVolume = Math.max(0, Math.floor(Number(input.maxVolume ?? 1000) || 0));
-  return { aggregator, control, country, params: { limit, maxVolume, minWords: 2, maxWords: 2, maxPosition: 20 } };
+  // fresh: new studies even if finished ones exist (a bigger sample needs them).
+  const fresh = input.fresh === true || input.fresh === 'on' || input.fresh === 'true';
+  const timingNames = Math.min(Math.max(Math.floor(Number(input.timingNames) || TIMING_NAMES), 0), 500);
+  return { aggregator, control, country, params: { limit, maxVolume, minWords: 2, maxWords: 2, maxPosition: 20, fresh, timingNames } };
 }
 
 /** Cost of a run before anything is created. Reused studies cost nothing. */
 export function estimateTrigger(input) {
   const { aggregator, control, country, params } = cleanTriggerInput(input);
-  const studyFor = (target) => findReusableStudy(target, country, 'desktop');
+  const studyFor = (target) => (params.fresh ? null : findReusableStudy(target, country, 'desktop'));
   const one = estimate(params);
   const fresh = [aggregator, control].filter((t) => !studyFor(t)).length;
-  const history = TIMING_NAMES * USD_HISTORY_MEASURED;
+  const history = params.timingNames * USD_HISTORY_MEASURED;
   const pagesUsd = PAGE_NAMES * dfs.USD_PER_HTML_PAGE;
   return {
     aggregator,
@@ -258,7 +261,7 @@ export async function runTrigger(runId, log, { load = loadStudyData } = {}) {
   for (const [role, target] of [['exposed', run.aggregator], ['control', run.control]]) {
     let id = role === 'exposed' ? run.exposed_study_id : run.control_study_id;
     if (!id || !getStudy(id)) {
-      id = findReusableStudy(target, run.country, 'desktop');
+      id = p.fresh ? null : findReusableStudy(target, run.country, 'desktop');
       if (id) log(`${target}: reusing finished study #${id} (no cost)`);
       else {
         log(`${target}: new study`);
@@ -278,7 +281,8 @@ export async function runTrigger(runId, log, { load = loadStudyData } = {}) {
 
   // 4: timing, for people with the aggregator and at least one candidate.
   const done = new Set(openDb().prepare('SELECT DISTINCT keyword FROM trigger_history WHERE run_id = ?').all(runId).map((r) => r.keyword));
-  const toTime = names.filter((n) => aggHit(n, run.aggregator) && candidates.some((c) => n.domains.has(c)) && !done.has(n.keyword)).slice(0, Math.max(0, TIMING_NAMES - done.size));
+  const timingNames = p.timingNames ?? TIMING_NAMES;
+  const toTime = names.filter((n) => aggHit(n, run.aggregator) && candidates.some((c) => n.domains.has(c)) && !done.has(n.keyword)).slice(0, Math.max(0, timingNames - done.size));
   dfs.resetSpend();
   if (toTime.length) log(`Timing: 12-month history for ${toTime.length} people (~$${(toTime.length * USD_HISTORY_MEASURED).toFixed(3)})…`);
   const locationCode = dfs.locationCode(run.country);
@@ -313,6 +317,85 @@ export async function runTrigger(runId, log, { load = loadStudyData } = {}) {
   log(`DataForSEO spent on timing and pages: $${dfs.spentUsd().toFixed(3)}`);
 }
 
+// --- kinds of page ----------------------------------------------------------------------
+// Each person's employer site is a different domain, so domain counts cannot
+// see "a team page on their company's website". Grouping every result into a
+// kind of page makes that pattern countable.
+
+const KIND_RULES = [
+  ['linkedin', 'LinkedIn profile', 'Create or complete the LinkedIn profile.', (d) => /(^|\.)linkedin\.com$/.test(d)],
+  ['regulatory', 'Regulatory or official filing', 'Usually follows from a role (officer, director, registered adviser); not something to publish, but worth knowing it feeds the aggregator.', (d) => /(^|\.)(sec\.gov|finra\.org|nasaa\.org|nmlsconsumeraccess\.org|find-and-update\.company-information\.service\.gov\.uk|opencorporates\.com|bizapedia\.com|opengovus\.com|congress\.gov)$/.test(d)],
+  ['press', 'Press-release wire', 'Issue a press release naming them (appointment, award, launch) on a wire.', (d) => /(^|\.)(prnewswire\.com|businesswire\.com|globenewswire\.com|accesswire\.com|einpresswire\.com|newswire\.com|prweb\.com|prlog\.org)$/.test(d)],
+  ['business-profile', 'Business profile site', 'Create or claim a profile there (Crunchbase, TheOrg and similar).', (d) => /(^|\.)(crunchbase\.com|theorg\.com|pitchbook\.com|craft\.co|owler\.com|f6s\.com|wellfound\.com|angel\.co|dnb\.com|cbinsights\.com|tracxn\.com|bizjournals\.com)$/.test(d)],
+  ['fellow', 'Another people-data aggregator', 'A symptom, not a source: it draws on the same data.', (d) => isFellowAggregator(d)],
+  ['wiki', 'Wikipedia or similar', 'Hard to place; usually follows from press coverage.', (d) => /(^|\.)(wikipedia\.org|wikidata\.org|everybodywiki\.com|alchetron\.com)$/.test(d)],
+  ['social', 'Social profile', 'Open or complete the social profile.', (d) => /(^|\.)(x\.com|twitter\.com|facebook\.com|instagram\.com|tiktok\.com|threads\.net|threads\.com|youtube\.com|medium\.com|substack\.com)$/.test(d)],
+];
+
+const fold = (s) => String(s ?? '').normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const nameTokens = (name) => fold(name).split(/[^a-z0-9]+/).filter((t) => t.length > 1);
+
+/**
+ * The kind of one result for one person. Rule order matters: listed sites
+ * first, then a site in the person's own name, then by the page's path.
+ */
+export function pageKind({ domain, url }, personName) {
+  for (const [id, , , test] of KIND_RULES) if (test(domain)) return id;
+  const label = domain.split('.').slice(0, -1).join('').replace(/[^a-z0-9]/g, '');
+  const toks = nameTokens(personName);
+  if (toks.length >= 2 && label.includes(toks.join(''))) return 'personal-site';
+  let path = '';
+  try {
+    path = new URL(url).pathname.toLowerCase();
+  } catch {
+    /* no path */
+  }
+  if (/\/(speakers?|events?|conference|summit|webinars?)(\/|$)/.test(path)) return 'speaker';
+  if (/\/(team|our-team|leadership|management|people|person|bio|bios|about|about-us|staff|board|partners?|executives?|directors?|professionals?|attorneys?|lawyers?|advisors?)(\/|$)/.test(path)) return 'company-page';
+  if (/\/(19|20)\d\d\/\d{1,2}\//.test(path) || /\/(news|article|articles|story|stories|press|blog)\//.test(path) || (path.split('/').pop() ?? '').split('-').length >= 4) return 'news';
+  return null;
+}
+
+export const KINDS = Object.fromEntries([
+  ...KIND_RULES.map(([id, label, action]) => [id, { label, action }]),
+  ['personal-site', { label: 'A site in their own name', action: 'Publish a personal site at their name (e.g. firstlast.com) with a bio.' }],
+  ['speaker', { label: 'Speaker or event bio', action: 'Speak at, or get listed by, an event that publishes speaker bios.' }],
+  ['company-page', { label: 'Team or bio page on a company website', action: 'Get a bio on their company’s (or board’s, firm’s) team or leadership page.' }],
+  ['news', { label: 'News or blog article', action: 'Earn or place an article that names them.' }],
+]);
+
+/** Pure: the same lift as liftTable, by kind of page instead of by domain. */
+export function kindLiftTable(names, aggregator, { minNames = 5, minBoth = 3 } = {}) {
+  const kinded = names.map((n) => {
+    const person = n.people?.[0] ?? n.keyword;
+    const kinds = new Set();
+    for (const [domain, v] of n.domains) {
+      if (isOf(domain, aggregator)) continue;
+      const k = pageKind({ domain, url: v.url }, person);
+      if (k) kinds.add(k);
+    }
+    return { ...n, kinds };
+  });
+  const withAgg = kinded.filter((n) => aggHit(n, aggregator));
+  const nA = withAgg.length;
+  const rows = [];
+  for (const kind of Object.keys(KINDS)) {
+    const nK = kinded.filter((n) => n.kinds.has(kind)).length;
+    if (nK < minNames) continue;
+    const both = withAgg.filter((n) => n.kinds.has(kind)).length;
+    if (both < minBoth) continue;
+    const nNot = kinded.length - nK;
+    const aNot = nA - both;
+    const lift = ((both + 0.5) / (nK + 1)) / ((aNot + 0.5) / (nNot + 1));
+    rows.push({ kind, ...KINDS[kind], names: nK, both, pWith: both / nK, pWithout: nNot ? aNot / nNot : 0, lift });
+  }
+  rows.sort((a, b) => b.lift - a.lift || b.both - a.both);
+  for (const r of rows) {
+    r.sentence = `People with a ${r.label.toLowerCase()} in their results were ${r.lift.toFixed(1)}× as likely to have a ${aggregator} page (${Math.round(r.pWith * 100)}% vs ${Math.round(r.pWithout * 100)}%; ${r.both} of ${nA} people with one).`;
+  }
+  return { people: kinded.length, withAggregator: nA, rows };
+}
+
 /** The result page: everything from stored data (free). */
 export function triggerReport(runId, { load = loadStudyData } = {}) {
   const run = getTriggerRun(runId);
@@ -333,6 +416,7 @@ export function triggerReport(runId, { load = loadStudyData } = {}) {
     timedCandidates: candidates,
     pages: { read: cites.read, failed: cites.failed, cues: cites.cues, topLinks: [...cites.links].sort((a, b) => b[1] - a[1]).slice(0, 15) },
     picks: rec.picks,
+    kinds: kindLiftTable(names, run.aggregator).rows,
     rows: rec.rows.slice(0, 60),
   };
 }

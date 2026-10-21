@@ -95,3 +95,46 @@ test('input checks and the estimate', () => {
   assert.equal(e.ahrefsUnits, 2 * 150 * 15);
   assert.ok(e.dataforseoUsd > 1 && e.dataforseoUsd < 3);
 });
+
+test('kinds of page: listed sites, own-name sites, company team pages, speaker bios, news', async () => {
+  const { pageKind, kindLiftTable } = await import('../src/triggers.js');
+  const k = (url, name = 'Jane Doe') => pageKind({ domain: new URL(url).hostname.replace(/^www\./, ''), url }, name);
+  assert.equal(k('https://www.linkedin.com/in/janedoe'), 'linkedin');
+  assert.equal(k('https://adviserinfo.sec.gov/individual/summary/123'), 'regulatory');
+  assert.equal(k('https://www.prnewswire.com/news-releases/acme-names-jane-doe-cfo-301.html'), 'press');
+  assert.equal(k('https://www.crunchbase.com/person/jane-doe'), 'business-profile');
+  assert.equal(k('https://rocketreach.co/jane-doe-email_1'), 'fellow');
+  assert.equal(k('https://janedoe.com/'), 'personal-site');
+  assert.equal(k('https://www.jane-doe.net/about'), 'personal-site');
+  assert.equal(k('https://acmecapital.com/team/jane-doe'), 'company-page');
+  assert.equal(k('https://acme.com/about-us'), 'company-page');
+  assert.equal(k('https://summit.example.org/speakers/jane-doe'), 'speaker');
+  assert.equal(k('https://localpaper.com/2025/03/04/jane-doe-opens-office/'), 'news');
+  assert.equal(k('https://example.com/'), null);
+
+  // 20 people: all 8 with a company team page have ZoomInfo; 2 of 12 others do.
+  const p = (keyword, urls) => ({ keyword, people: [keyword], orgs: [], volume: 1, results: urls.map((u, i) => ({ position: i + 1, url: u, domain: new URL(u).hostname.replace(/^www\./, ''), title: '' })) });
+  const people = [
+    ...Array.from({ length: 8 }, (_, i) => p(`team ${i}`, [`https://firm${i}.com/team/person-${i}`, 'https://zoominfo.com/p/x'])),
+    ...Array.from({ length: 2 }, (_, i) => p(`zi ${i}`, ['https://zoominfo.com/p/y'])),
+    ...Array.from({ length: 10 }, (_, i) => p(`none ${i}`, ['https://facebook.com/x'])),
+  ];
+  const { nameSets } = await import('../src/triggers.js');
+  const t = kindLiftTable(nameSets(people), 'zoominfo.com');
+  const team = t.rows.find((r) => r.kind === 'company-page');
+  assert.deepEqual([team.names, team.both, team.pWith], [8, 8, 1]);
+  assert.ok(team.lift > 4);
+  assert.match(team.sentence, /team or bio page on a company website/);
+});
+
+test('fresh runs ignore finished studies; timing size scales the estimate', async () => {
+  const db = await import('../src/db.js');
+  const d = db.openDb();
+  const { lastInsertRowid } = d.prepare("INSERT INTO studies (target, country, params, created_at) VALUES ('rocketreach.co', 'us', '{}', 'x')").run();
+  d.prepare("INSERT INTO keywords (study_id, keyword, people, orgs, serp_at) VALUES (?, 'k', '[]', '[]', 'x')").run(lastInsertRowid);
+  const reuse = estimateTrigger({ aggregator: 'rocketreach.co', limit: 100 });
+  assert.equal(reuse.newStudies, 1); // rocketreach reused, linkedin new
+  const fresh = estimateTrigger({ aggregator: 'rocketreach.co', limit: 100, fresh: true, timingNames: 150 });
+  assert.equal(fresh.newStudies, 2);
+  assert.ok(fresh.historyUsd > reuse.historyUsd);
+});

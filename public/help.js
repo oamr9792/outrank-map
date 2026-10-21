@@ -224,6 +224,11 @@ export const HELP = {
     what: 'Finds which websites tend to come before, or travel with, a people-aggregator page (ZoomInfo, RocketReach, MarketScreener…), by comparing people who have one with comparable people who don’t.',
     use: 'Pick the 3–4 sources to get your client onto first, so the aggregators follow and fill more of the top 10 with neutral profiles.',
   },
+  kinds: {
+    name: 'By kind of page',
+    what: 'The same comparison as the site table, but grouping results into kinds: their own website, a team page on a company site, a press release, a regulatory filing, a business profile, a news article, LinkedIn…',
+    use: 'Finds patterns no single site shows, like “people with a bio on their company’s team page get ZoomInfo”, and says what to do about each.',
+  },
   lift: {
     name: 'Lift',
     what: 'How many times likelier a person is to have the aggregator page when they’re on this site than when they’re not. 3× means three times as likely.',

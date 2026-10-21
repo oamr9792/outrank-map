@@ -1257,6 +1257,7 @@ function openTrigger(id) {
 $('#newTrigger').addEventListener('submit', async (e) => {
   e.preventDefault();
   const body = Object.fromEntries(new FormData(e.target));
+  body.fresh = Boolean(e.target.fresh.checked);
   try {
     const est = await api('/api/triggers/estimate', { method: 'POST', body: JSON.stringify(body) });
     const reused = [est.reuse.exposed && `${est.aggregator} (study #${est.reuse.exposed})`, est.reuse.control && `${est.control} (study #${est.reuse.control})`].filter(Boolean);
@@ -1289,6 +1290,13 @@ async function loadTrigger() {
 
     <section class="card"><h2>Recommended sources</h2>
       ${r.picks.length ? r.picks.map((p, i) => `<div class="pick"><h3>${i + 1}. ${esc(p.domain)} ${p.access ? `<span class="tag">${esc(p.access)}</span>` : ''}</h3><p>${esc(p.sentence)}</p></div>`).join('') : `<p class="muted">Not enough evidence yet: ${r.withAggregator < 15 ? `only ${r.withAggregator} people have a ${esc(a)} result. Raise “People per side” and run again.` : 'no site clears the bar (lift 1.5+ or cited by 20%+ of pages).'}</p>`}
+    </section>
+
+    <section class="card"><h2>By kind of page${helpIcon('kinds')}</h2>
+      ${r.kinds.length ? `<div class="tablewrap"><table><thead><tr><th>Kind of page</th><th class="num">Lift</th><th class="num">With</th><th class="num">Without</th><th class="num">Together</th><th>What to do</th></tr></thead><tbody>
+      ${r.kinds.map((k) => `<tr title="${esc(k.sentence)}"><td>${esc(k.label)}${k.kind === 'fellow' ? ' <span class="tag neg">symptom</span>' : ''}</td><td class="num"><b>${k.lift.toFixed(1)}×</b></td><td class="num">${pct(k.pWith)}</td><td class="num">${pct(k.pWithout)}</td><td class="num">${k.both}</td><td class="muted">${esc(k.action)}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="muted">Catches what single sites cannot: each person's company website is a different domain, but "a team page on a company website" is one kind.</p>` : '<p class="muted">Not enough people yet to compare kinds of page.</p>'}
     </section>
 
     <section class="card"><h2>All candidate sites</h2>

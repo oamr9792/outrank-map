@@ -44,6 +44,10 @@
             <label>People per side <input name="limit" type="number" min="20" max="2000" value="150"></label>
             <label>Max volume <input name="maxVolume" type="number" min="0" value="1000" title="Leave out famous names on both sides"></label>
           </div>
+          <div class="row">
+            <label>People to time <input name="timingNames" type="number" min="0" max="500" value="60" title="People whose 12-month history is checked for which page came first"></label>
+            <label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" name="fresh" style="width:auto"> Fresh studies</label>
+          </div>
           <button type="submit">Estimate and run</button>
         </form>
         <ul id="triggerRuns" class="studies"></ul>

@@ -138,3 +138,14 @@ test('fresh runs ignore finished studies; timing size scales the estimate', asyn
   assert.equal(fresh.newStudies, 2);
   assert.ok(fresh.historyUsd > reuse.historyUsd);
 });
+
+test('links and phrases on most pages are the aggregator template, not citations', () => {
+  const page = (extra = [], cues = ['user / contributor']) => ({ linkDomains: ['linkedin.com', 'gtm.ai', ...extra], cues });
+  const pages = new Map(Array.from({ length: 12 }, (_, i) => [`u${i}`, page(i < 4 ? ['acme.com'] : [], i < 2 ? ['user / contributor', 'press release'] : ['user / contributor'])]));
+  const c = citationTable(pages);
+  assert.deepEqual(c.template.sort(), ['gtm.ai', 'linkedin.com']);
+  assert.equal(c.links.get('linkedin.com'), undefined);
+  assert.equal(c.links.get('acme.com'), 4);
+  assert.deepEqual(c.templateCues, ['user / contributor']);
+  assert.deepEqual(c.cues, [['press release', 2]]);
+});

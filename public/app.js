@@ -1310,7 +1310,8 @@ async function loadTrigger() {
     <section class="card"><h2>What ${esc(a)}'s pages cite</h2>
       ${r.pages.read && r.pages.read < 10 ? `<p class="muted">Only ${r.pages.read} page${r.pages.read === 1 ? '' : 's'} could be read${r.pages.failed ? ` (${r.pages.failed} refused)` : ''}: too few to count as evidence, so citations are not used in the recommendations.</p>` : ''}
       ${r.pages.read ? `<p>Read ${r.pages.read} pages. Phrases found: ${r.pages.cues.map(([c, n]) => `${esc(c)} (${n})`).join(', ') || 'none'}.</p>
-      <p class="muted">Most-linked sites: ${r.pages.topLinks.map(([d, n]) => `${esc(d)} ${n}`).join(' · ') || 'none'}</p>` : `<p class="muted">${r.pages.failed ? `${esc(a)} refused all ${r.pages.failed} page reads, so there is no citation evidence; rely on co-occurrence and timing.` : 'Not read yet.'}</p>`}
+      <p class="muted">Most-linked sites: ${r.pages.topLinks.map(([d, n]) => `${esc(d)} ${n}`).join(' · ') || 'none beyond the site’s own template'}</p>
+      ${r.pages.template?.length ? `<p class="muted">Ignored as ${esc(a)}'s own page template (on most pages): ${r.pages.template.map(esc).join(', ')}${r.pages.templateCues?.length ? `; phrases: ${r.pages.templateCues.map(esc).join(', ')}` : ''}.</p>` : ''}` : `<p class="muted">${r.pages.failed ? `${esc(a)} refused all ${r.pages.failed} page reads, so there is no citation evidence; rely on co-occurrence and timing.` : 'Not read yet.'}</p>`}
     </section>`;
   $('#tResume').onclick = async () => {
     await api(`/api/triggers/${id}/resume`, { method: 'POST' }).catch((err) => alert(err.message));

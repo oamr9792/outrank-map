@@ -151,16 +151,29 @@ export function readAggregatorPage(html, aggregator) {
   return { linkDomains: [...domains], cues: CUES.filter(([, re]) => re.test(text)).map(([c]) => c) };
 }
 
-/** Pure: per domain, how many read aggregator pages link to it; cue counts. */
+/**
+ * Links or phrases on most of an aggregator's pages are its own template
+ * (footer social links, "claim your profile"), not a citation of the person.
+ * The ZoomInfo run had linkedin.com, facebook.com and gtm.ai on 127 of 127.
+ */
+export const TEMPLATE_SHARE = 0.6;
+
+/** Pure: per domain, how many read aggregator pages link to it; cue counts. Template items are set apart. */
 export function citationTable(pages) {
   const read = [...pages.values()].filter((p) => !p.error);
-  const links = new Map();
-  const cues = new Map();
-  for (const p of read) {
-    for (const d of p.linkDomains) links.set(d, (links.get(d) ?? 0) + 1);
-    for (const c of p.cues) cues.set(c, (cues.get(c) ?? 0) + 1);
-  }
-  return { read: read.length, failed: pages.size - read.length, links, cues: [...cues].sort((a, b) => b[1] - a[1]) };
+  const count = (key) => {
+    const m = new Map();
+    for (const p of read) for (const x of new Set(p[key])) m.set(x, (m.get(x) ?? 0) + 1);
+    return m;
+  };
+  const allLinks = count('linkDomains');
+  const allCues = count('cues');
+  const isTemplate = (n) => read.length >= MIN_PAGES_FOR_CITATION && n / read.length > TEMPLATE_SHARE;
+  const links = new Map([...allLinks].filter(([, n]) => !isTemplate(n)));
+  const template = [...allLinks].filter(([, n]) => isTemplate(n)).map(([d]) => d);
+  const cues = [...allCues].filter(([, n]) => !isTemplate(n)).sort((a, b) => b[1] - a[1]);
+  const templateCues = [...allCues].filter(([, n]) => isTemplate(n)).map(([c]) => c);
+  return { read: read.length, failed: pages.size - read.length, links, cues, template, templateCues };
 }
 
 const pctText = (x) => `${Math.round(x * 100)}%`;
@@ -414,7 +427,7 @@ export function triggerReport(runId, { load = loadStudyData } = {}) {
     withAggregator: lift.withAggregator,
     timedPeople: history.size,
     timedCandidates: candidates,
-    pages: { read: cites.read, failed: cites.failed, cues: cites.cues, topLinks: [...cites.links].sort((a, b) => b[1] - a[1]).slice(0, 15) },
+    pages: { read: cites.read, failed: cites.failed, cues: cites.cues, topLinks: [...cites.links].sort((a, b) => b[1] - a[1]).slice(0, 15), template: cites.template, templateCues: cites.templateCues },
     picks: rec.picks,
     kinds: kindLiftTable(names, run.aggregator).rows,
     rows: rec.rows.slice(0, 60),

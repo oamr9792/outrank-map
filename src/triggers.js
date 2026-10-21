@@ -27,6 +27,18 @@ const USD_HISTORY_MEASURED = 0.0006;
 
 const isOf = (domain, root) => domain === root || domain.endsWith(`.${root}`);
 
+// Citation evidence only counts once enough of the aggregator's pages were
+// read: one readable page linking to facebook.com is not "cited by 100%".
+export const MIN_PAGES_FOR_CITATION = 10;
+
+/**
+ * Other people-data aggregators and people-search sites. They travel with
+ * each other because they draw on the same data, so they are shown as
+ * fellow aggregators, never recommended as a source to get onto.
+ */
+const FELLOW = /(^|\.)(zoominfo\.com|rocketreach\.co|contactout\.com|signalhire\.com|apollo\.io|lusha\.com|seamless\.ai|leadiq\.com|adapt\.io|kaspr\.io|clearbit\.com|uplead\.com|datanyze\.com|whitepages\.com|truepeoplesearch\.com|fastpeoplesearch\.com|spokeo\.com|radaris\.com|411\.com|peoplefinders\.com|beenverified\.com|intelius\.com|clustrmaps\.com|nuwber\.com|marketscreener\.com|wallmine\.com|gurufocus\.com|prabook\.com)$/;
+export const isFellowAggregator = (domain) => FELLOW.test(domain);
+
 // --- pure analysis -----------------------------------------------------------------
 
 /** One entry per person: the domains in their live results (best position, URL). */
@@ -164,13 +176,14 @@ export function recommend(lift, timing, cites, aggregator, { top = 4 } = {}) {
     const decisive = t ? t.before + t.after : 0;
     const firstShare = decisive ? t.before / decisive : null;
     const cited = cites?.links.get(r.domain) ?? 0;
-    const citedShare = cites?.read ? cited / cites.read : 0;
+    const citedShare = cites?.read >= MIN_PAGES_FOR_CITATION ? cited / cites.read : 0;
+    const fellow = isFellowAggregator(r.domain);
     const timingFactor = firstShare == null ? 1 : 0.5 + firstShare; // 0.5x … 1.5x
     const score = Math.log(Math.max(r.lift, 1)) * Math.sqrt(r.both) * timingFactor + 2 * citedShare;
-    return { ...r, timing: t, firstShare, cited, citedShare, score };
+    return { ...r, timing: t, firstShare, cited, citedShare, fellow, score };
   });
   rows.sort((a, b) => b.score - a.score);
-  const picks = rows.filter((r) => r.lift >= 1.5 || r.citedShare >= 0.2).slice(0, top);
+  const picks = rows.filter((r) => !r.fellow && (r.lift >= 1.5 || r.citedShare >= 0.2)).slice(0, top);
   for (const r of rows) r.sentence = sentence(r, aggregator, lift);
   return { rows, picks };
 }
@@ -184,6 +197,7 @@ function sentence(r, agg, lift) {
     else if (t.alreadyBoth || t.same) parts.push('In the 12-month history both were already there, so the order is unknown.');
   }
   if (r.cited) parts.push(`${agg} pages linked to it ${r.cited} time${r.cited === 1 ? '' : 's'}.`);
+  if (r.fellow) parts.push('It is another people-data aggregator: it travels with the same sources, it is not one to publish on.');
   return parts.join(' ');
 }
 

@@ -1294,12 +1294,13 @@ async function loadTrigger() {
     <section class="card"><h2>All candidate sites</h2>
       <div class="tablewrap"><table><thead><tr><th>Site</th><th class="num">Lift${helpIcon('lift')}</th><th class="num">With site${helpIcon('pWith')}</th><th class="num">Without</th><th class="num">Together</th><th class="num">First${helpIcon('firstShare')}</th><th class="num">Cited${helpIcon('cited')}</th><th>Access</th></tr></thead><tbody>
       ${r.rows.map((x) => `<tr title="${esc(x.sentence)}"><td>${esc(x.domain)}</td><td class="num"><b>${x.lift.toFixed(1)}×</b></td><td class="num">${pct(x.pWith)}</td><td class="num">${pct(x.pWithout)}</td><td class="num">${x.both}</td>
-        <td class="num">${timingKnown(x.timing) ? `${x.timing.before} of ${timingKnown(x.timing)}` : '<span class="muted">–</span>'}</td><td class="num">${x.cited || ''}</td><td>${x.access ? `<span class="tag">${esc(x.access)}</span>` : ''}</td></tr>`).join('') || `<tr><td colspan="8" class="muted">No candidates yet.</td></tr>`}
+        <td class="num">${timingKnown(x.timing) ? `${x.timing.before} of ${timingKnown(x.timing)}` : '<span class="muted">–</span>'}</td><td class="num">${x.cited || ''}</td><td>${x.fellow ? '<span class="tag neg" title="Another people-data aggregator: a symptom, not a source">fellow aggregator</span>' : x.access ? `<span class="tag">${esc(x.access)}</span>` : ''}</td></tr>`).join('') || `<tr><td colspan="8" class="muted">No candidates yet.</td></tr>`}
       </tbody></table></div>
       <p class="muted">Lift is how many times likelier a person is to have a ${esc(a)} page when they are on that site. Timing was fetched for the top ${r.timedCandidates.length} sites by lift: ${r.timedCandidates.map(esc).join(', ') || 'none yet'}.</p>
     </section>
 
     <section class="card"><h2>What ${esc(a)}'s pages cite</h2>
+      ${r.pages.read && r.pages.read < 10 ? `<p class="muted">Only ${r.pages.read} page${r.pages.read === 1 ? '' : 's'} could be read${r.pages.failed ? ` (${r.pages.failed} refused)` : ''}: too few to count as evidence, so citations are not used in the recommendations.</p>` : ''}
       ${r.pages.read ? `<p>Read ${r.pages.read} pages. Phrases found: ${r.pages.cues.map(([c, n]) => `${esc(c)} (${n})`).join(', ') || 'none'}.</p>
       <p class="muted">Most-linked sites: ${r.pages.topLinks.map(([d, n]) => `${esc(d)} ${n}`).join(' · ') || 'none'}</p>` : `<p class="muted">${r.pages.failed ? `${esc(a)} refused all ${r.pages.failed} page reads, so there is no citation evidence; rely on co-occurrence and timing.` : 'Not read yet.'}</p>`}
     </section>`;

@@ -72,6 +72,21 @@ test('recommendations: lift, timing and citation combine; weak sites are not pic
   assert.match(rows[0].sentence, /linked to it 3 times/);
 });
 
+test('fellow aggregators are labelled, never picked; one readable page is not citation evidence', () => {
+  const rows = [
+    { domain: 'rocketreach.co', lift: 4, both: 12, names: 20, pWith: 0.6, pWithout: 0.1 },
+    { domain: 'facebook.com', lift: 1.1, both: 30, names: 150, pWith: 0.2, pWithout: 0.18 },
+    { domain: 'crunchbase.com', lift: 2.5, both: 8, names: 15, pWith: 0.5, pWithout: 0.2 },
+  ];
+  const lift = { people: 200, withAggregator: 40, rows };
+  const onePage = { read: 1, failed: 39, links: new Map([['facebook.com', 1]]), cues: [] };
+  const { picks, rows: out } = recommend(lift, {}, onePage, 'zoominfo.com');
+  assert.deepEqual(picks.map((p) => p.domain), ['crunchbase.com']);
+  assert.equal(out.find((r) => r.domain === 'rocketreach.co').fellow, true);
+  assert.equal(out.find((r) => r.domain === 'facebook.com').citedShare, 0);
+  assert.match(out.find((r) => r.domain === 'rocketreach.co').sentence, /another people-data aggregator/);
+});
+
 test('input checks and the estimate', () => {
   assert.throws(() => cleanTriggerInput({ aggregator: 'zoominfo.com', control: 'zoominfo.com' }), /must differ/);
   assert.deepEqual(cleanTriggerInput({ aggregator: 'https://www.ZoomInfo.com/p/x', limit: 5 }).params.limit, 20);

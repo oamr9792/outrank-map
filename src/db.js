@@ -60,6 +60,40 @@ CREATE TABLE IF NOT EXISTS history (
   PRIMARY KEY (keyword_id, snapshot_date)
 );
 
+-- Aggregator triggers: which sites travel with (and precede) a people
+-- aggregator such as ZoomInfo. A run pairs a study of the aggregator with a
+-- control study of comparable people.
+CREATE TABLE IF NOT EXISTS trigger_runs (
+  id INTEGER PRIMARY KEY,
+  aggregator TEXT NOT NULL,
+  control TEXT NOT NULL,
+  country TEXT NOT NULL,
+  exposed_study_id INTEGER REFERENCES studies(id) ON DELETE SET NULL,
+  control_study_id INTEGER REFERENCES studies(id) ON DELETE SET NULL,
+  params TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  history_cost REAL NOT NULL DEFAULT 0,
+  pages_cost REAL NOT NULL DEFAULT 0
+);
+-- Every domain in the top results of each monthly snapshot, for the names
+-- sampled for timing.
+CREATE TABLE IF NOT EXISTS trigger_history (
+  run_id INTEGER NOT NULL REFERENCES trigger_runs(id) ON DELETE CASCADE,
+  keyword TEXT NOT NULL,
+  snapshot_date TEXT NOT NULL,
+  domain TEXT NOT NULL,
+  position INTEGER NOT NULL,
+  PRIMARY KEY (run_id, keyword, snapshot_date, domain)
+);
+-- An aggregator profile page, read for the sites it links to or names.
+CREATE TABLE IF NOT EXISTS aggregator_pages (
+  url TEXT PRIMARY KEY,
+  fetched_at TEXT NOT NULL,
+  error TEXT,
+  link_domains TEXT NOT NULL DEFAULT '[]',
+  cues TEXT NOT NULL DEFAULT '[]'
+);
+
 -- Item 8: the client's own shortlist, starred in the merged table.
 CREATE TABLE IF NOT EXISTS client_picks (
   client_id INTEGER NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -435,3 +469,57 @@ export function saveClientPick(clientId, domain, note) {
 }
 
 export const removeClientPick = (clientId, domain) => openDb().prepare('DELETE FROM client_picks WHERE client_id = ? AND domain = ?').run(clientId, String(domain).toLowerCase());
+
+// --- aggregator triggers ----------------------------------------------------------------
+
+export function createTriggerRun({ aggregator, control, country, params }) {
+  const { lastInsertRowid } = openDb()
+    .prepare('INSERT INTO trigger_runs (aggregator, control, country, params, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(aggregator, control, country, JSON.stringify(params ?? {}), new Date().toISOString());
+  return Number(lastInsertRowid);
+}
+
+const parseRun = (r) => (r ? { ...r, params: JSON.parse(r.params) } : null);
+export const getTriggerRun = (id) => parseRun(openDb().prepare('SELECT * FROM trigger_runs WHERE id = ?').get(id));
+export const listTriggerRuns = () => openDb().prepare('SELECT * FROM trigger_runs ORDER BY id DESC').all().map(parseRun);
+export const deleteTriggerRun = (id) => openDb().prepare('DELETE FROM trigger_runs WHERE id = ?').run(id);
+
+export function setTriggerStudies(id, { exposed, control }) {
+  const d = openDb();
+  if (exposed !== undefined) d.prepare('UPDATE trigger_runs SET exposed_study_id = ? WHERE id = ?').run(exposed, id);
+  if (control !== undefined) d.prepare('UPDATE trigger_runs SET control_study_id = ? WHERE id = ?').run(control, id);
+}
+
+export function saveTriggerHistory(runId, keyword, snapshots, cost) {
+  tx((d) => {
+    d.prepare('DELETE FROM trigger_history WHERE run_id = ? AND keyword = ?').run(runId, keyword);
+    const ins = d.prepare('INSERT OR IGNORE INTO trigger_history (run_id, keyword, snapshot_date, domain, position) VALUES (?, ?, ?, ?, ?)');
+    for (const s of snapshots) for (const r of s.results) ins.run(runId, keyword, s.date, r.domain, r.position);
+    d.prepare('UPDATE trigger_runs SET history_cost = history_cost + ? WHERE id = ?').run(cost, runId);
+  });
+}
+
+/** keyword -> [{ date, domains: Map(domain -> best position) }] by date. */
+export function loadTriggerHistory(runId) {
+  const out = new Map();
+  for (const r of openDb().prepare('SELECT * FROM trigger_history WHERE run_id = ? ORDER BY keyword, snapshot_date').all(runId)) {
+    if (!out.has(r.keyword)) out.set(r.keyword, new Map());
+    const byDate = out.get(r.keyword);
+    if (!byDate.has(r.snapshot_date)) byDate.set(r.snapshot_date, new Map());
+    const m = byDate.get(r.snapshot_date);
+    if (!m.has(r.domain) || r.position < m.get(r.domain)) m.set(r.domain, r.position);
+  }
+  return new Map([...out].map(([k, byDate]) => [k, [...byDate].map(([date, domains]) => ({ date, domains }))]));
+}
+
+export function saveAggregatorPage(url, { linkDomains = [], cues = [], error = null }, cost, runId) {
+  openDb()
+    .prepare('INSERT OR REPLACE INTO aggregator_pages (url, fetched_at, error, link_domains, cues) VALUES (?, ?, ?, ?, ?)')
+    .run(url, new Date().toISOString(), error, JSON.stringify(linkDomains), JSON.stringify(cues));
+  if (runId) openDb().prepare('UPDATE trigger_runs SET pages_cost = pages_cost + ? WHERE id = ?').run(cost, runId);
+}
+
+export function getAggregatorPages(urls) {
+  const get = openDb().prepare('SELECT * FROM aggregator_pages WHERE url = ?');
+  return new Map(urls.map((u) => [u, get.get(u)]).filter(([, r]) => r).map(([u, r]) => [u, { ...r, linkDomains: JSON.parse(r.link_domains), cues: JSON.parse(r.cues) }]));
+}

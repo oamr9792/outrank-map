@@ -78,6 +78,17 @@ After you publish something, log it under **4 · Placements and outcomes** on th
 
 **Calibration** (bottom of *All studies*) puts what the tool predicted next to what actually happened, across all clients. After a few months it tells you how much to trust the scores.
 
+### E. Aggregator triggers (ZoomInfo, RocketReach, MarketScreener…)
+
+People-aggregator sites build profiles from other sources. Getting your client onto those sources tends to bring the aggregator profiles with it: neutral pages that fill more of the top 10.
+
+Under **Aggregator triggers**, enter the aggregator (e.g. zoominfo.com) and press **Estimate and run**. It shows the cost first: about 4,500 Ahrefs units and ~$1.50 for 150 people a side. It compares people who have a profile there with comparable people who don't, and reports:
+- **Lift**: how much likelier the profile is when someone is on a given site.
+- **First**: how often that site appeared in Google before the profile did.
+- **Cited**: how often the aggregator's own pages link to it.
+
+The top 3–4 under **Recommended sources** are where to get your client listed first. It's strong evidence, not proof: log what you publish under Placements and check later.
+
 ## Reading the numbers: rules of thumb
 
 - **Use weighted reach to rank, and reach to sanity-check.**

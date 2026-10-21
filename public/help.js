@@ -218,6 +218,33 @@ export const HELP = {
     use: 'The evidence behind its numbers across your whole history.',
   },
 
+  // --- aggregator triggers ------------------------------------------------------------------
+  triggers: {
+    name: 'Aggregator triggers',
+    what: 'Finds which websites tend to come before, or travel with, a people-aggregator page (ZoomInfo, RocketReach, MarketScreener…), by comparing people who have one with comparable people who don’t.',
+    use: 'Pick the 3–4 sources to get your client onto first, so the aggregators follow and fill more of the top 10 with neutral profiles.',
+  },
+  lift: {
+    name: 'Lift',
+    what: 'How many times likelier a person is to have the aggregator page when they’re on this site than when they’re not. 3× means three times as likely.',
+    use: 'The first filter. Under about 1.5× the site makes little difference.',
+  },
+  pWith: {
+    name: 'With site / without',
+    what: 'Of the people on this site, the share who also have the aggregator page, next to the same share for people who aren’t on it.',
+    use: 'The plain numbers behind lift. A big gap is what you want.',
+  },
+  firstShare: {
+    name: 'First',
+    what: 'In people’s 12-month Google history, how often this site appeared before the aggregator page, out of the cases where the order is clear.',
+    use: 'Points at direction: a site that usually comes first is more likely a source than a copy.',
+  },
+  cited: {
+    name: 'Cited',
+    what: 'How many of the aggregator’s own profile pages link to this site.',
+    use: 'The most direct evidence: the aggregator is pointing at where it got the data.',
+  },
+
   // --- placements & calibration ---------------------------------------------------------------
   placements: {
     name: 'Placements',

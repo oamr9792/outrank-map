@@ -33,6 +33,23 @@
       </section>
 
       <section class="card">
+        <h2>Aggregator triggers</h2>
+        <form id="newTrigger">
+          <label>Aggregator <input name="aggregator" placeholder="zoominfo.com" required></label>
+          <div class="row">
+            <label>Compare with <input name="control" value="linkedin.com" title="Comparable people, most of whom do not have the aggregator page"></label>
+            <label>Country <input name="country" value="us" maxlength="2" size="3"></label>
+          </div>
+          <div class="row">
+            <label>People per side <input name="limit" type="number" min="20" max="2000" value="150"></label>
+            <label>Max volume <input name="maxVolume" type="number" min="0" value="1000" title="Leave out famous names on both sides"></label>
+          </div>
+          <button type="submit">Estimate and run</button>
+        </form>
+        <ul id="triggerRuns" class="studies"></ul>
+      </section>
+
+      <section class="card">
         <h2>Clients</h2>
         <ul id="clients" class="studies"></ul>
       </section>

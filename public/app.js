@@ -151,6 +151,7 @@ async function refreshStatus() {
   state.categories = s.negativeCategories ?? [];
   renderStudies(s.studies);
   renderClients(s.clients);
+  renderTriggerRuns();
   const j = s.job;
   $('#jobCard').hidden = !j.running && !j.log.length;
   $('#jobTitle').textContent = j.running ? 'Running…' : j.error ? 'Stopped' : 'Last run';
@@ -158,11 +159,13 @@ async function refreshStatus() {
   $('#jobLog').scrollTop = 1e9;
   $('#new button').disabled = j.running;
   $('#newClient button').disabled = j.running;
+  $('#newTrigger button').disabled = j.running;
   if (j.running && !polling) polling = setInterval(tick, 3000);
   if (!j.running && polling) {
     clearInterval(polling);
     polling = null;
-    if (j.clientId && state.clientId === j.clientId) loadClient(j.kind !== 'name-serp');
+    if (j.triggerId && state.view === 'trigger' && state.triggerId === j.triggerId) loadTrigger();
+    else if (j.clientId && state.clientId === j.clientId) loadClient(j.kind !== 'name-serp');
     else {
       if (j.studyId && !state.studyId && !state.clientId) state.studyId = j.studyId;
       if (state.studyId) loadStudy();
@@ -213,7 +216,7 @@ $('#studies').addEventListener('click', async (e) => {
   state.studyId = Number(li.dataset.id);
   state.clientId = null;
   state.pMode = 'saved';
-  if (['all', 'clientReport', 'guide'].includes(state.view)) state.view = 'table';
+  if (['all', 'clientReport', 'guide', 'trigger'].includes(state.view)) state.view = 'table';
   state.domain = null;
   state.view = 'table';
   refreshStatus();
@@ -537,7 +540,7 @@ $('#clients').addEventListener('click', async (e) => {
 });
 
 function openClient(id) {
-  if (['all', 'clientReport', 'guide'].includes(state.view)) state.view = 'table';
+  if (['all', 'clientReport', 'guide', 'trigger'].includes(state.view)) state.view = 'table';
   state.clientId = id;
   state.studyId = null;
   state.cDomain = null;
@@ -1216,4 +1219,94 @@ function suggestionBlock(list, kind, hosts) {
       ${multi ? `<td class="num muted" title="Average reach across hosts">avg ${pct(s.avgReach)}</td>` : ''}
       <td class="muted">${Object.entries(s.types).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([t]) => esc(t)).join(', ')}</td></tr>`).join('')}</tbody></table>
   </div>`;
+}
+
+// ---- aggregator triggers -----------------------------------------------------------------
+// What gets a person onto ZoomInfo, RocketReach, MarketScreener… Co-occurrence,
+// timing and citation evidence, combined into a short list of sources.
+
+async function renderTriggerRuns() {
+  const { runs } = await api('/api/triggers').catch(() => ({ runs: [] }));
+  $('#triggerRuns').innerHTML = runs.length
+    ? runs.map((r) => `<li data-tid="${r.id}" class="${state.view === 'trigger' && r.id === state.triggerId ? 'on' : ''}"><span><b>${esc(r.aggregator)}</b> <span class="muted">vs ${esc(r.control)} · ${esc(r.country.toUpperCase())}</span></span><button class="x" data-tdel="${r.id}" title="Delete run">×</button></li>`).join('')
+    : '';
+}
+
+$('#triggerRuns').addEventListener('click', async (e) => {
+  const del = e.target.closest('[data-tdel]');
+  if (del) {
+    e.stopPropagation();
+    if (!confirm('Delete this run? Its studies are kept.')) return;
+    await api(`/api/triggers/${del.dataset.tdel}`, { method: 'DELETE' }).catch((err) => alert(err.message));
+    if (Number(del.dataset.tdel) === state.triggerId && state.view === 'trigger') $('#view').innerHTML = '<div class="empty">Run a study, or pick one on the left.</div>';
+    return renderTriggerRuns();
+  }
+  const li = e.target.closest('li[data-tid]');
+  if (li) openTrigger(Number(li.dataset.tid));
+});
+
+function openTrigger(id) {
+  state.studyId = null;
+  state.clientId = null;
+  state.view = 'trigger';
+  state.triggerId = id;
+  refreshStatus();
+  loadTrigger();
+}
+
+$('#newTrigger').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target));
+  try {
+    const est = await api('/api/triggers/estimate', { method: 'POST', body: JSON.stringify(body) });
+    const reused = [est.reuse.exposed && `${est.aggregator} (study #${est.reuse.exposed})`, est.reuse.control && `${est.control} (study #${est.reuse.control})`].filter(Boolean);
+    const msg = `Find what triggers ${est.aggregator} pages, against ${est.control}.\n\n`
+      + `${est.newStudies} new stud${est.newStudies === 1 ? 'y' : 'ies'}${reused.length ? `; reusing ${reused.join(', ')}` : ''}.\n`
+      + `Ahrefs: up to ${num(est.ahrefsUnits)} units.\n`
+      + `DataForSEO: about $${est.dataforseoUsd} (live results $${est.serpUsd}, 12-month timing $${est.historyUsd}, reading ${est.aggregator} pages $${est.pagesUsd}).\n`
+      + `About ${est.minutes} minutes.\n\nRun it?`;
+    if (!confirm(msg)) return;
+    const { id } = await api('/api/triggers', { method: 'POST', body: JSON.stringify(body) });
+    openTrigger(id);
+    if (!polling) polling = setInterval(tick, 3000);
+  } catch (err) {
+    alert(err.message);
+  }
+});
+
+async function loadTrigger() {
+  const id = state.triggerId;
+  const r = await api(`/api/triggers/${id}`).catch((err) => ({ error: err.message }));
+  if (state.view !== 'trigger' || id !== state.triggerId) return;
+  if (r.error) return ($('#view').innerHTML = `<div class="empty">${esc(r.error)}</div>`);
+  const a = r.run.aggregator;
+  const timingKnown = (t) => (t ? t.before + t.after : 0);
+  $('#view').innerHTML = `
+    <div class="head"><h3>What gets people onto ${esc(a)}</h3>
+      <div class="muted">${esc(r.run.country.toUpperCase())} · ${num(r.people)} people (from ${esc(a)} and ${esc(r.run.control)} name searches), ${num(r.withAggregator)} with a ${esc(a)} result · ${r.timedPeople} timed · ${r.pages.read} ${esc(a)} pages read${r.pages.failed ? `, ${r.pages.failed} refused` : ''} · $${(r.run.history_cost + r.run.pages_cost).toFixed(3)} on timing and pages
+        <button class="ghost small" id="tResume" title="Fetch anything missing">Resume / fill gaps</button></div></div>
+    <p class="muted">${helpIcon('triggers')} Three kinds of evidence: sites that travel with ${esc(a)} pages (co-occurrence), sites that showed up first in the same person's 12-month Google history (timing), and sites ${esc(a)}'s own pages link to (citation). Together they point to the sources to get onto first; none of them alone proves cause. Log placements and check later to confirm.</p>
+
+    <section class="card"><h2>Recommended sources</h2>
+      ${r.picks.length ? r.picks.map((p, i) => `<div class="pick"><h3>${i + 1}. ${esc(p.domain)} ${p.access ? `<span class="tag">${esc(p.access)}</span>` : ''}</h3><p>${esc(p.sentence)}</p></div>`).join('') : `<p class="muted">Not enough evidence yet: ${r.withAggregator < 15 ? `only ${r.withAggregator} people have a ${esc(a)} result. Raise “People per side” and run again.` : 'no site clears the bar (lift 1.5+ or cited by 20%+ of pages).'}</p>`}
+    </section>
+
+    <section class="card"><h2>All candidate sites</h2>
+      <div class="tablewrap"><table><thead><tr><th>Site</th><th class="num">Lift${helpIcon('lift')}</th><th class="num">With site${helpIcon('pWith')}</th><th class="num">Without</th><th class="num">Together</th><th class="num">First${helpIcon('firstShare')}</th><th class="num">Cited${helpIcon('cited')}</th><th>Access</th></tr></thead><tbody>
+      ${r.rows.map((x) => `<tr title="${esc(x.sentence)}"><td>${esc(x.domain)}</td><td class="num"><b>${x.lift.toFixed(1)}×</b></td><td class="num">${pct(x.pWith)}</td><td class="num">${pct(x.pWithout)}</td><td class="num">${x.both}</td>
+        <td class="num">${timingKnown(x.timing) ? `${x.timing.before} of ${timingKnown(x.timing)}` : '<span class="muted">–</span>'}</td><td class="num">${x.cited || ''}</td><td>${x.access ? `<span class="tag">${esc(x.access)}</span>` : ''}</td></tr>`).join('') || `<tr><td colspan="8" class="muted">No candidates yet.</td></tr>`}
+      </tbody></table></div>
+      <p class="muted">Lift is how many times likelier a person is to have a ${esc(a)} page when they are on that site. Timing was fetched for the top ${r.timedCandidates.length} sites by lift: ${r.timedCandidates.map(esc).join(', ') || 'none yet'}.</p>
+    </section>
+
+    <section class="card"><h2>What ${esc(a)}'s pages cite</h2>
+      ${r.pages.read ? `<p>Read ${r.pages.read} pages. Phrases found: ${r.pages.cues.map(([c, n]) => `${esc(c)} (${n})`).join(', ') || 'none'}.</p>
+      <p class="muted">Most-linked sites: ${r.pages.topLinks.map(([d, n]) => `${esc(d)} ${n}`).join(' · ') || 'none'}</p>` : `<p class="muted">${r.pages.failed ? `${esc(a)} refused all ${r.pages.failed} page reads, so there is no citation evidence; rely on co-occurrence and timing.` : 'Not read yet.'}</p>`}
+    </section>`;
+  $('#tResume').onclick = async () => {
+    await api(`/api/triggers/${id}/resume`, { method: 'POST' }).catch((err) => alert(err.message));
+    refreshStatus();
+    if (!polling) polling = setInterval(tick, 3000);
+  };
+  renderTriggerRuns();
 }

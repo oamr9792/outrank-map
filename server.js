@@ -13,13 +13,14 @@ if (process.env.RENDER && !process.env.DB_PATH) {
 }
 installTrustStore((process.env.EXTRA_CA_CERTS || '').split(';').filter(Boolean));
 
-const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick, createClient, getClient, listClients, deleteClient, listTargets, setTargets, setClientVolume, deletePlacement, listClientPicks, saveClientPick, removeClientPick } = await import('./src/db.js');
+const { openDb, listStudies, getStudy, deleteStudy, updateStudy, loadStudyData, listPicks, savePick, removePick, createClient, getClient, listClients, deleteClient, listTargets, setTargets, setClientVolume, deletePlacement, listClientPicks, saveClientPick, removeClientPick, listTriggerRuns, deleteTriggerRun } = await import('./src/db.js');
 const clients = await import('./src/client.js');
 const pages = await import('./src/pages.js');
 const decay = await import('./src/decay.js');
 const { allStudies } = await import('./src/allstudies.js');
 const placements = await import('./src/placements.js');
 const plan = await import('./src/plan.js');
+const triggers = await import('./src/triggers.js');
 const auth = await import('./src/auth.js');
 const { createStudy, fetchSerps, estimate, DEFAULTS } = await import('./src/run.js');
 const { scoreDomains, domainDetail, cleanProfile, PRESETS, VOLUME_BANDS } = await import('./src/score.js');
@@ -40,11 +41,11 @@ const PUBLIC = path.join(ROOT, 'public');
 const MIME = { '.md': 'text/markdown; charset=utf-8', '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
 
 // One background job at a time: every job spends API units or money.
-const job = { running: false, kind: null, studyId: null, clientId: null, startedAt: null, finishedAt: null, log: [], error: null };
+const job = { running: false, kind: null, studyId: null, clientId: null, triggerId: null, startedAt: null, finishedAt: null, log: [], error: null };
 
 function startJob(kind, fn) {
   if (job.running) return false;
-  Object.assign(job, { running: true, kind, studyId: null, clientId: null, startedAt: new Date().toISOString(), finishedAt: null, log: [], error: null });
+  Object.assign(job, { running: true, kind, studyId: null, clientId: null, triggerId: null, startedAt: new Date().toISOString(), finishedAt: null, log: [], error: null });
   const log = (line) => {
     job.log.push(line);
     if (job.log.length > 400) job.log.splice(0, job.log.length - 400);
@@ -156,6 +157,40 @@ async function api(req, res, url) {
     return send(res, started ? 202 : 409, started ? { started: true } : { error: 'a job is already running' });
   }
 
+  const busy = () => send(res, 409, { error: 'a job is already running' });
+  // --- aggregator triggers -------------------------------------------------------------
+  if (route === 'GET /api/triggers') return send(res, 200, { runs: listTriggerRuns() });
+  if (route === 'POST /api/triggers/estimate') return send(res, 200, triggers.estimateTrigger(await readJson(req)));
+  if (route === 'POST /api/triggers') {
+    if (job.running) return busy();
+    const body = await readJson(req);
+    const id = triggers.startTriggerRun(body);
+    startJob('triggers', async (log) => {
+      job.triggerId = id;
+      await triggers.runTrigger(id, log, { load: studyData });
+      log('Done.');
+    });
+    return send(res, 202, { id });
+  }
+  const tm = url.pathname.match(/^\/api\/triggers\/(\d+)(\/resume)?$/);
+  if (tm) {
+    const id = Number(tm[1]);
+    if (req.method === 'GET' && !tm[2]) return send(res, 200, triggers.triggerReport(id, { load: studyData }));
+    if (req.method === 'POST' && tm[2]) {
+      const started = startJob('triggers', async (log) => {
+        job.triggerId = id;
+        await triggers.runTrigger(id, log, { load: studyData });
+        log('Done.');
+      });
+      return started ? send(res, 202, { started: true }) : busy();
+    }
+    if (req.method === 'DELETE' && !tm[2]) {
+      if (job.running && job.triggerId === id) return busy();
+      deleteTriggerRun(id);
+      return send(res, 200, { ok: true });
+    }
+  }
+
   if (route === 'GET /api/calibration') return send(res, 200, { rows: placements.calibration() });
   if (route === 'GET /api/all') {
     const scope = PRESETS[q.get('scope')] ? q.get('scope') : 'all';
@@ -163,7 +198,6 @@ async function api(req, res, url) {
   }
 
   // --- clients ------------------------------------------------------------------
-  const busy = () => send(res, 409, { error: 'a job is already running' });
   // Pulls the client's name SERP as a job (it spends DataForSEO credit and
   // shares the run's budget counter, so it must not overlap another job).
   const nameSerpJob = (clientId, urls = []) =>

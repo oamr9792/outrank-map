@@ -7,9 +7,10 @@ const BASE = 'https://api.ahrefs.com/v3';
 
 export const hasKey = () => Boolean(process.env.AHREFS_API_KEY);
 
-// Observed on a live call: keyword, entities, best_position, best_position_url
-// and volume cost 15 units per row. volume alone is 10 of those.
-export const UNITS_PER_KEYWORD = 15;
+// Measured October 2026: the person-keyword pull (keyword, entities,
+// best_position, best_position_url, volume, with the entity/position/word
+// filters) costs 17 units a row: 100 keywords cost 1,700 units.
+export const UNITS_PER_KEYWORD = 17;
 
 async function get(pathname, params) {
   if (!hasKey()) throw new Error('AHREFS_API_KEY is not set in .env');

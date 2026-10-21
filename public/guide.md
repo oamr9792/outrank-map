@@ -21,7 +21,7 @@ Every ⓘ in the app explains a number in plain words, and what to use it for.
 | Step | Who charges | Rough cost |
 |---|---|---|
 | Search the client's name | DataForSEO | ~$0.005 |
-| A new study (300 searches) | Ahrefs + DataForSEO | ~4,500 units + ~$1.40 |
+| A new study (300 searches) | Ahrefs + DataForSEO | ~5,100 units + ~$1.40 |
 | Reusing an old study | — | free |
 | Fetch the name's search volume (optional) | DataForSEO | ~$0.075 |
 | Explain shortlist | Ahrefs + DataForSEO | ~8 units a page + a fraction of a cent; cached pages are free |
@@ -82,7 +82,7 @@ After you publish something, log it under **4 · Placements and outcomes** on th
 
 People-aggregator sites build profiles from other sources. Getting your client onto those sources tends to bring the aggregator profiles with it: neutral pages that fill more of the top 10.
 
-Under **Aggregator triggers**, enter the aggregator (e.g. zoominfo.com) and press **Estimate and run**. It shows the cost first: about 4,500 Ahrefs units and ~$1.50 for 150 people a side. It compares people who have a profile there with comparable people who don't, and reports:
+Under **Aggregator triggers**, enter the aggregator (e.g. zoominfo.com) and press **Estimate and run**. It shows the cost first: about 5,100 Ahrefs units and ~$1.50 for 150 people a side. It compares people who have a profile there with comparable people who don't, and reports:
 - **Lift**: how much likelier the profile is when someone is on a given site.
 - **First**: how often that site appeared in Google before the profile did.
 - **Cited**: how often the aggregator's own pages link to it.

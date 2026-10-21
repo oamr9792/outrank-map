@@ -92,7 +92,7 @@ test('input checks and the estimate', () => {
   assert.deepEqual(cleanTriggerInput({ aggregator: 'https://www.ZoomInfo.com/p/x', limit: 5 }).params.limit, 20);
   const e = estimateTrigger({ aggregator: 'zoominfo.com', control: 'linkedin.com', limit: 150 });
   assert.equal(e.newStudies, 2);
-  assert.equal(e.ahrefsUnits, 2 * 150 * 15);
+  assert.equal(e.ahrefsUnits, 2 * 150 * 17);
   assert.ok(e.dataforseoUsd > 1 && e.dataforseoUsd < 3);
 });
 

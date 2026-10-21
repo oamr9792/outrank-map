@@ -16,7 +16,7 @@ what it is and what to use it for; the text lives in `public/help.js`.
    keywords that contain a person entity, filtered to a word-count range
    (default 2–2 — "first last"; 2–4 adds "name + employer" searches), a target position ceiling and an optional
    volume band, organic positions only (Top stories carousel hits are
-   excluded — they rarely survive to the live organic results). ~15 API
+   excluded — they rarely survive to the live organic results). ~17 API
    units per keyword; the run refuses to start if the
    key's remaining monthly units would not cover it.
 2. **DataForSEO** (`serp/google/organic/live/advanced`) pulls the live Google
